@@ -53,6 +53,7 @@ export function PlayersPanel() {
 export function ChallengeForm({ target, onDone }: { target: OnlinePlayer; onDone: () => void }) {
   const [format, setFormat] = useState<'singles' | 'doubles'>('singles');
   const [level, setLevel] = useState<0 | 50 | 100>(50);
+  const [engine, setEngine] = useState<'rom' | 'sim'>('rom');
   return (
     <div className="challenge-form">
       <div className="row">
@@ -63,16 +64,27 @@ export function ChallengeForm({ target, onDone }: { target: OnlinePlayer; onDone
         </div>
       </div>
       <div className="row">
-        <span className="muted">Cấp độ</span>
-        <div className="seg" role="group" aria-label="Cấp độ">
-          <button aria-pressed={level === 50} onClick={() => setLevel(50)}>Lv 50</button>
-          <button aria-pressed={level === 100} onClick={() => setLevel(100)}>Lv 100</button>
-          <button aria-pressed={level === 0} onClick={() => setLevel(0)}>Giữ nguyên</button>
+        <span className="muted">Kiểu trận</span>
+        <div className="seg" role="group" aria-label="Kiểu trận">
+          <button aria-pressed={engine === 'rom'} onClick={() => setEngine('rom')}>Trong game</button>
+          <button aria-pressed={engine === 'sim'} onClick={() => setEngine('sim')}>Mô phỏng nhanh</button>
         </div>
       </div>
+      {engine === 'sim' ? (
+        <div className="row">
+          <span className="muted">Cấp độ</span>
+          <div className="seg" role="group" aria-label="Cấp độ">
+            <button aria-pressed={level === 50} onClick={() => setLevel(50)}>Lv 50</button>
+            <button aria-pressed={level === 100} onClick={() => setLevel(100)}>Lv 100</button>
+            <button aria-pressed={level === 0} onClick={() => setLevel(0)}>Giữ nguyên</button>
+          </div>
+        </div>
+      ) : (
+        <p className="muted" style={{ fontSize: 13 }}>Trận link thật của game: đầy đủ hiệu ứng, cấp độ giữ nguyên, đội hình được trả lại sau trận.</p>
+      )}
       <div className="row">
         <button className="btn sm ghost" onClick={onDone}>Huỷ</button>
-        <button className="btn sm primary" onClick={() => { send({ t: 'challenge', to: target.id, format, level }); onDone(); }}>
+        <button className="btn sm primary" onClick={() => { send({ t: 'challenge', to: target.id, format, level, engine }); onDone(); }}>
           Gửi lời thách đấu tới {target.name}
         </button>
       </div>

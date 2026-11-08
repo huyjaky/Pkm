@@ -7,7 +7,7 @@ import { api, type User } from '../lib/api';
 import { game, setGameKeyboard, setSpeed, setVolume, SPEEDS, togglePause } from '../lib/game';
 import { send, session } from '../lib/session';
 import { useStore } from '../lib/store';
-import { BattleScreen } from './BattleScreen';
+import { BattleScreen, Countdown } from './BattleScreen';
 import { ChatPanel } from './ChatPanel';
 import { enterFullscreen, GameStage } from './GameStage';
 import { HudMinimap } from './HudMinimap';
@@ -37,6 +37,7 @@ export function Shell({ user, onLogout }: { user: User; onLogout: () => void }) 
   const incoming = challenges.filter(c => c.to === meId);
   const players = useStore(session, s => s.players);
   const battle = useStore(session, s => s.battle);
+  const romBattle = useStore(session, s => s.romBattle);
   const connected = useStore(session, s => s.connected);
   const phase = useStore(game, s => s.phase);
   const battleId = battle?.id;
@@ -78,7 +79,21 @@ export function Shell({ user, onLogout }: { user: User; onLogout: () => void }) 
         )}
       </div>
 
-      {!open && !battle && incoming.length > 0 && (
+      {romBattle?.phase === 'battle' && romBattle.deadline && (
+        <div className="banner compact" role="timer">
+          <span>Đến lượt bạn chọn</span>
+          <Countdown deadline={romBattle.deadline} />
+        </div>
+      )}
+
+      {romBattle?.phase === 'starting' && !open && (
+        <div className="banner" role="status">
+          <Swords aria-hidden="true" />
+          <span>Sắp đấu với <b>{romBattle.opponents.join(' & ') || 'đối thủ'}</b>: đứng tự do ngoài bản đồ để bắt đầu</span>
+        </div>
+      )}
+
+      {!open && !battle && !romBattle && incoming.length > 0 && (
         <div className="banner" role="alert">
           <Swords aria-hidden="true" />
           <span><b>{nameOf(incoming[0].from)}</b> thách đấu bạn</span>

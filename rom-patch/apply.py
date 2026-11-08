@@ -39,6 +39,8 @@ def main() -> None:
     print(f"Applying online-players patch to {repo}")
     shutil.copyfile(HERE / "include/online_players.h", repo / "include/online_players.h")
     shutil.copyfile(HERE / "src/online_players.c", repo / "src/online_players.c")
+    shutil.copyfile(HERE / "include/online_link.h", repo / "include/online_link.h")
+    shutil.copyfile(HERE / "src/online_link.c", repo / "src/online_link.c")
 
     patch(repo / "src/overworld.c", [
         ('#include "overworld.h"\n',
@@ -60,6 +62,32 @@ def main() -> None:
         ("         && !FollowerNPC_IsCollisionExempt(curObject, objectEvent)\n",
          "         && !FollowerNPC_IsCollisionExempt(curObject, objectEvent)\n"
          "         && !IS_LOCALID_ONLINE_PLAYER(curObject->localId) // Hoenn Link: nobody bumps into ghosts\n"),
+    ])
+    # Virtual link cable: real in-ROM link battles relayed over the internet.
+    patch(repo / "src/link.c", [
+        ('#include "link.h"\n',
+         '#include "link.h"\n#include "online_link.h" // Hoenn Link\n'),
+        ("    u32 retVal2;\n",
+         "    u32 retVal2;\n\n    if (VLink_IsOpen()) // Hoenn Link: virtual cable instead of the serial port\n"
+         "        return VLink_Main1(sendCmd, recvCmds);\n"),
+        ("    return SIO_MULTI_CNT->id;\n",
+         "    if (VLink_IsActive()) // Hoenn Link\n        return gVLink.multiplayerId;\n    return SIO_MULTI_CNT->id;\n"),
+        ("        CreateTask(Task_TriggerHandshake, 2);\n",
+         "        CreateTask(Task_TriggerHandshake, 2);\n        VLink_OnOpenLink(); // Hoenn Link\n"),
+        ("    sLinkOpen = FALSE;\n",
+         "    sLinkOpen = FALSE;\n    VLink_OnCloseLink(); // Hoenn Link\n"),
+    ])
+    patch(repo / "src/main.c", [
+        ('#include "link.h"\n', '#include "link.h"\n#include "online_link.h" // Hoenn Link\n'),
+        ("    if (!HandleLinkConnection())\n",
+         "    VLink_Update(); // Hoenn Link\n    if (!HandleLinkConnection())\n"),
+    ])
+    patch(repo / "src/cable_club.c", [
+        ('#include "link.h"\n', '#include "link.h"\n#include "online_link.h" // Hoenn Link\n'),
+        # Players can join a few seconds apart over the internet: no 5 s timeout, no saved-roster check.
+        ("    if (task->tTimer > 300)\n", "    if (task->tTimer > 300 && !VLink_IsActive()) // Hoenn Link\n"),
+        ("            if (!DoesLinkPlayerCountMatchSaved())\n",
+         "            if (!VLink_IsActive() && !DoesLinkPlayerCountMatchSaved()) // Hoenn Link\n"),
     ])
     print("Done.")
 

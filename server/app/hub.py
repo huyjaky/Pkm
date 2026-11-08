@@ -65,10 +65,36 @@ class Challenge:
     to_id: int
     format: str
     level: int
+    engine: str = "rom"  # "rom": real in-game link battle; "sim": Showdown simulator
     created: float = field(default_factory=time.time)
 
     def public(self) -> dict:
-        return {"id": self.id, "from": self.from_id, "to": self.to_id, "format": self.format, "level": self.level}
+        return {"id": self.id, "from": self.from_id, "to": self.to_id, "format": self.format,
+                "level": self.level, "engine": self.engine}
+
+
+# gBattleOutcome values (include/constants/battle.h)
+B_OUTCOME_WON, B_OUTCOME_LOST, B_OUTCOME_DREW = 1, 2, 3
+B_OUTCOME_LINK_BATTLE_RAN = 0x80
+
+
+@dataclass
+class RomBattle:
+    """A real link battle running inside the players' ROMs; the server only relays link commands."""
+    id: str
+    kind: str                # singles | doubles
+    players: list[int]       # index = link multiplayer id (0 is the link master)
+    names: list[str]
+    ended: bool = False
+    started: float = field(default_factory=time.time)
+    timers: dict[int, asyncio.Task] = field(default_factory=dict)  # user id -> AFK timer
+
+    def mp_of(self, user_id: int) -> int | None:
+        return self.players.index(user_id) if user_id in self.players else None
+
+    def summary(self) -> dict:
+        return {"id": self.id, "format": self.kind, "level": 0, "engine": "rom",
+                "players": [{"slot": f"p{i + 1}", "userId": u, "name": self.names[i]} for i, u in enumerate(self.players)]}
 
 
 @dataclass
@@ -122,6 +148,7 @@ class Hub:
         self.challenges: dict[str, Challenge] = {}
         self.rooms: dict[str, Room] = {}
         self.battles: dict[str, BattleState] = {}
+        self.rom_battles: dict[str, RomBattle] = {}
         self.chat: list[dict] = []
         self._ids = itertools.count(1)
         self._presence_dirty = False
@@ -198,13 +225,16 @@ class Hub:
             "you": p.public(),
             "players": self._player_list(),
             "rooms": [r.public() for r in self.rooms.values()],
-            "battles": [b.summary() for b in self.battles.values() if not b.ended],
+            "battles": self._battle_list(),
             "challenges": [c.public() for c in self.challenges.values() if p.id in (c.from_id, c.to_id)],
             "chat": self.chat[-CHAT_HISTORY:],
             "party": [m.to_dict() for m in p.party],
         })
         if p.battle_id and (b := self.battles.get(p.battle_id)):
             await self._send_battle_snapshot(p.id, b)
+        if p.battle_id and (rb := self.rom_battles.get(p.battle_id)) and not rb.ended:
+            # A reloaded page cannot rejoin a link battle that lived in the old emulator: it counts as leaving.
+            await self._finish_rom_battle(rb, loser_mp=rb.mp_of(p.id), reason="left")
         self._presence_dirty = True
         return p
 
@@ -224,6 +254,9 @@ class Hub:
 
     async def _forfeit_later(self, p: Player) -> None:
         await asyncio.sleep(DISCONNECT_FORFEIT_SECONDS)
+        if not p.online and p.battle_id and (rb := self.rom_battles.get(p.battle_id)) and not rb.ended:
+            await self._finish_rom_battle(rb, loser_mp=rb.mp_of(p.id), reason="left")
+            return
         if not p.online and p.battle_id and (b := self.battles.get(p.battle_id)) and not b.ended:
             slot = b.slot_of(p.id)
             if slot:
@@ -307,7 +340,8 @@ class Hub:
                 return await self.error(p.id, reason)
         if any(c.from_id == p.id and c.to_id == target.id for c in self.challenges.values()):
             return await self.error(p.id, "Bạn đã gửi lời thách đấu rồi")
-        ch = Challenge(id=self._new_id("c"), from_id=p.id, to_id=target.id, format=fmt, level=level)
+        engine = "sim" if m.get("engine") == "sim" else "rom"
+        ch = Challenge(id=self._new_id("c"), from_id=p.id, to_id=target.id, format=fmt, level=level, engine=engine)
         self.challenges[ch.id] = ch
         await self.send(p.id, {"t": "challenge", "challenge": ch.public()})
         await self.send(target.id, {"t": "challenge", "challenge": ch.public()})
@@ -337,7 +371,10 @@ class Hub:
                 await self.error(p.id, reason)
                 return await self._close_challenge(ch.id, "unavailable")
         await self._close_challenge(ch.id, "accepted")
-        await self._start_battle(ch.format, ch.level, {"p1": a, "p2": b})
+        if ch.engine == "rom":
+            await self._start_rom_battle(ch.format, [a, b])
+        else:
+            await self._start_battle(ch.format, ch.level, {"p1": a, "p2": b})
 
     # 2v2 team rooms ----------------------------------------------------------
     async def _rooms_changed(self) -> None:
@@ -437,7 +474,93 @@ class Hub:
         except RuntimeError as e:
             await self._abort_battle(state, str(e))
             return
-        await self.broadcast({"t": "battles", "battles": [b.summary() for b in self.battles.values() if not b.ended]})
+        await self.broadcast({"t": "battles", "battles": self._battle_list()})
+        self._presence_dirty = True
+
+    # in-ROM link battles -----------------------------------------------------------
+    def _battle_list(self) -> list[dict]:
+        return [b.summary() for b in self.battles.values() if not b.ended] +                [r.summary() for r in self.rom_battles.values() if not r.ended]
+
+    async def _start_rom_battle(self, kind: str, players: list[Player]) -> None:
+        rb = RomBattle(id=self._new_id("v"), kind=kind, players=[pl.id for pl in players], names=[pl.name for pl in players])
+        self.rom_battles[rb.id] = rb
+        roster = [{"mpId": i, "userId": pl.id, "name": pl.name, "color": pl.color} for i, pl in enumerate(players)]
+        for i, pl in enumerate(players):
+            pl.battle_id = rb.id
+            await self.send(pl.id, {"t": "vlink_start", "battle": {
+                "id": rb.id, "kind": kind, "mpId": i, "count": len(players), "players": roster}})
+        await self.broadcast({"t": "battles", "battles": self._battle_list()})
+        self._presence_dirty = True
+
+    async def on_vlink_cmds(self, p: Player, m: dict) -> None:
+        rb = self.rom_battles.get(str(m.get("battle")))
+        mp = rb.mp_of(p.id) if rb else None
+        data = m.get("data")
+        if not rb or rb.ended or mp is None or not isinstance(data, str) or len(data) > 65536:
+            return
+        for uid in rb.players:
+            if uid != p.id:
+                await self.send(uid, {"t": "vlink_cmds", "battle": rb.id, "from": mp, "data": data})
+
+    async def on_vlink_input(self, p: Player, m: dict) -> None:
+        """The player's ROM started (waiting=True) or stopped waiting for their battle choice."""
+        rb = self.rom_battles.get(str(m.get("battle")))
+        mp = rb.mp_of(p.id) if rb else None
+        if not rb or rb.ended or mp is None:
+            return
+        old = rb.timers.pop(p.id, None)
+        if old:
+            old.cancel()
+        deadline = None
+        if m.get("waiting"):
+            deadline = time.time() + TURN_SECONDS
+            rb.timers[p.id] = asyncio.create_task(self._rom_turn_timeout(rb, p.id, TURN_SECONDS))
+        await self.send(p.id, {"t": "vlink_deadline", "battle": rb.id, "deadline": int(deadline * 1000) if deadline else None})
+
+    async def _rom_turn_timeout(self, rb: RomBattle, user_id: int, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+        if not rb.ended:
+            log.info("rom battle %s: %s timed out (AFK)", rb.id, rb.names[rb.mp_of(user_id) or 0])
+            await self._finish_rom_battle(rb, loser_mp=rb.mp_of(user_id), reason="afk")
+
+    async def on_vlink_end(self, p: Player, m: dict) -> None:
+        """A player's ROM finished the battle and reports gBattleOutcome from its own point of view."""
+        rb = self.rom_battles.get(str(m.get("battle")))
+        mp = rb.mp_of(p.id) if rb else None
+        if not rb or mp is None:
+            return
+        if rb.ended:
+            if p.battle_id == rb.id:
+                p.battle_id = None
+                self._presence_dirty = True
+            return
+        outcome = int(m.get("outcome", 0))
+        base = outcome & 0x7F
+        if base == B_OUTCOME_WON:
+            await self._finish_rom_battle(rb, loser_mp=mp ^ 1)
+        elif base == B_OUTCOME_DREW:
+            await self._finish_rom_battle(rb, loser_mp=None)
+        else:  # lost, ran away (forfeit) or anything else counts as a loss for the reporter
+            await self._finish_rom_battle(rb, loser_mp=mp)
+
+    async def _finish_rom_battle(self, rb: RomBattle, loser_mp: int | None, reason: str = "") -> None:
+        rb.ended = True
+        for task in rb.timers.values():
+            if task is not asyncio.current_task():
+                task.cancel()
+        rb.timers.clear()
+        if loser_mp is not None:
+            winners = [u for i, u in enumerate(rb.players) if (i & 1) != (loser_mp & 1)]
+            losers = [u for i, u in enumerate(rb.players) if (i & 1) == (loser_mp & 1)]
+            self.db.record_result(winners, losers)
+        for i, uid in enumerate(rb.players):
+            won = loser_mp is not None and (i & 1) != (loser_mp & 1)
+            await self.send(uid, {"t": "vlink_end", "battle": rb.id, "won": won, "reason": reason,
+                                  "winner": rb.names[loser_mp ^ 1] if loser_mp is not None and len(rb.names) > 1 else ""})
+            if (pl := self.players.get(uid)) and pl.battle_id == rb.id and (reason or not pl.online):
+                pl.battle_id = None
+        self.rom_battles.pop(rb.id, None)
+        await self.broadcast({"t": "battles", "battles": self._battle_list()})
         self._presence_dirty = True
 
     async def _abort_battle(self, b: BattleState, reason: str) -> None:
@@ -594,5 +717,5 @@ class Hub:
         except RuntimeError:
             pass
         self.battles.pop(b.id, None)
-        await self.broadcast({"t": "battles", "battles": [x.summary() for x in self.battles.values() if not x.ended]})
+        await self.broadcast({"t": "battles", "battles": self._battle_list()})
         self._presence_dirty = True

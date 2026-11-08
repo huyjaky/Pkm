@@ -35,6 +35,14 @@ RAM_SYMBOLS = [
     "gOnlineSelf",
     "gOnlinePlayers",
     "gOnlinePlayersMagic",
+    "gVLink",
+    # in-ROM link battles: detect when the game waits for this player's choice (AFK timer)
+    "gBattlerControllerFuncs",
+    "HandleInputChooseAction",
+    "HandleInputChooseMove",
+    "HandleInputChooseTarget",
+    "HandleInputShowTargets",
+    "CB2_UpdatePartyMenu",
 ]
 
 # Region map is drawn with a 1-tile margin on the left and 2 tiles on top (region_map.c).
@@ -44,6 +52,11 @@ REGION_MAP_CROP = (0, 0, 31 * 8, 19 * 8)
 
 
 # --------------------------------------------------------------------------- symbols
+# Static functions that exist once per battle controller (player, safari, Wally...): keep every address.
+MULTI_SYMBOLS = {"HandleInputChooseAction", "HandleInputChooseMove", "HandleInputChooseTarget", "HandleInputShowTargets"}
+ALL_ADDRESSES: dict[str, list[int]] = {}
+
+
 def read_symbols(repo: Path, nm: str) -> dict[str, int]:
     """Prefer `nm` on the ELF, fall back to parsing the linker .map file."""
     elf = repo / "pokeemerald.elf"
@@ -52,8 +65,10 @@ def read_symbols(repo: Path, nm: str) -> dict[str, int]:
         out = subprocess.run([nm, str(elf)], capture_output=True, text=True, check=True).stdout
         for line in out.splitlines():
             parts = line.split()
+            if len(parts) == 3 and parts[2] in MULTI_SYMBOLS:
+                ALL_ADDRESSES.setdefault(parts[2], []).append(int(parts[0], 16))
             if len(parts) == 3 and parts[2] in RAM_SYMBOLS:
-                found[parts[2]] = int(parts[0], 16)
+                found.setdefault(parts[2], int(parts[0], 16))
     if len(found) < len(RAM_SYMBOLS):
         map_file = repo / "pokeemerald.map"
         if map_file.exists():
@@ -274,6 +289,8 @@ def main() -> int:
         # Clients fetch /api/rom?v=<romHash>, so a rebuilt ROM is never mixed with stale symbols.
         "romHash": rom_hash,
         "symbols": {k: f"0x{v:08X}" for k, v in symbols.items()},
+        # Every battle-controller function that waits for the player's choice (AFK timer).
+        "battleInput": sorted({f"0x{a:08X}" for addrs in ALL_ADDRESSES.values() for a in addrs}),
         "layout": {
             "partyMonSize": 100,
             "boxMonSize": 80,

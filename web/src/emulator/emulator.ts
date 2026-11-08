@@ -182,6 +182,9 @@ export class Emulator {
     }
   }
 
+  /** Located GBA memory, or null until calibrated. */
+  get mem(): GbaMemory | null { return this.memory; }
+
   /** Shows friends in the overworld (needs the rom-patch symbols). */
   writeGhosts(sym: GameSymbols, slots: (Ghost | null)[]): boolean {
     return this.memory ? writeGhosts(this.memory, sym, slots) : false;

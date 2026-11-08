@@ -204,6 +204,7 @@ a { color: var(--ink); text-underline-offset: 3px; }
   max-width: calc(100vw - 140px);
 }
 .banner > svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.banner.compact { padding: 6px 6px 6px 12px; gap: 8px; font-size: 13px; top: auto; bottom: max(12px, env(safe-area-inset-bottom)); }
 .banner span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Popup with the side features */

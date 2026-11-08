@@ -69,7 +69,7 @@ function IncomingChallenge({ c, from }: { c: Challenge; from: string }) {
     <div className="card incoming" role="alert">
       <div>
         <h2>{from} thách đấu bạn</h2>
-        <p className="muted">{formatText(c.format)} · {levelText(c.level)} · dùng đội hình hiện tại trong game</p>
+        <p className="muted">{formatText(c.format)} · {c.engine === 'sim' ? `mô phỏng, ${levelText(c.level)}` : 'trận thật trong game'} · dùng đội hình hiện tại</p>
       </div>
       <div className="actions">
         <button className="btn sm ghost" onClick={() => send({ t: 'challenge_reply', id: c.id, accept: false })}>Từ chối</button>

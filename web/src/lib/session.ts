@@ -9,7 +9,7 @@ export type OnlinePlayer = {
   id: number; name: string; color: string; online: boolean; pos: Pos | null;
   inBattle: boolean; roomId: string | null; partySize: number; lead: number | null;
 };
-export type Challenge = { id: string; from: number; to: number; format: 'singles' | 'doubles'; level: number };
+export type Challenge = { id: string; from: number; to: number; format: 'singles' | 'doubles'; level: number; engine?: 'rom' | 'sim' };
 export type Room = { id: string; host: number; level: number; name: string; teams: { A: number[]; B: number[] } };
 export type BattleSummary = { id: string; format: string; level: number; players: { slot: string; userId: number; name: string }[] };
 export type ChatEntry = { from: number; name: string; color: string; text: string; at: number };
@@ -32,11 +32,20 @@ type State = {
   party: PartyMon[];
   battle: BattleView | null;
   toasts: Toast[];
+  /** A real in-game link battle in progress (ROM engine). */
+  romBattle: { id: string; kind: string; mpId: number; opponents: string[]; phase: 'starting' | 'battle'; deadline?: number | null } | null;
 };
+
+/** game.ts plugs the emulator side of in-ROM link battles in here (avoids an import cycle). */
+export const linkHandlers: {
+  start?: (b: { id: string; kind: string; mpId: number; count: number }) => void;
+  cmds?: (battle: string, from: number, data: string) => void;
+  end?: (battle: string, won: boolean, reason: string) => void;
+} = {};
 
 export const session = createStore<State>({
   connected: false, me: null, players: [], challenges: [], rooms: [], battles: [], chat: [], unread: 0, chatOpen: false,
-  party: [], battle: null, toasts: [],
+  party: [], battle: null, toasts: [], romBattle: null,
 });
 
 let ws: WebSocket | null = null;
@@ -145,6 +154,31 @@ function handle(m: any) {
     if (b) {
       session.set({ battle: { ...b, ended: true, won: m.won ?? null, winner: m.winner, aborted: m.aborted, afk: m.afk, request: null, deadline: null } });
       if (m.aborted) toast(`Trận đấu bị huỷ: ${m.aborted}`, 'error');
+    }
+    break;
+  case 'vlink_start': {
+    const b = m.battle;
+    session.set({ romBattle: { id: b.id, kind: b.kind, mpId: b.mpId, phase: 'starting',
+      opponents: b.players.filter((p: { mpId: number }) => (p.mpId & 1) !== (b.mpId & 1)).map((p: { name: string }) => p.name) } });
+    linkHandlers.start?.(b);
+    break;
+  }
+  case 'vlink_deadline':
+    {
+      const rb = s.romBattle;
+      if (rb && rb.id === m.battle) session.set({ romBattle: { ...rb, deadline: m.deadline } });
+    }
+    break;
+  case 'vlink_cmds':
+    linkHandlers.cmds?.(m.battle, m.from, m.data);
+    break;
+  case 'vlink_end':
+    linkHandlers.end?.(m.battle, !!m.won, m.reason ?? '');
+    if (s.romBattle?.id === m.battle) {
+      session.set({ romBattle: null });
+      if (m.reason === 'afk') toast(m.won ? 'Đối thủ không chọn kịp (AFK), bạn được xử thắng.' : 'Bạn không chọn kịp nên bị xử thua (AFK).', m.won ? 'success' : 'error');
+      else if (m.reason === 'left') toast(m.won ? 'Đối thủ đã rời trận, bạn được xử thắng.' : 'Bạn đã rời trận và bị xử thua.', m.won ? 'success' : 'error');
+      else toast(m.won ? 'Bạn đã thắng trận đấu!' : `${m.winner || 'Đối thủ'} thắng trận này.`, m.won ? 'success' : 'info');
     }
     break;
   case 'error':

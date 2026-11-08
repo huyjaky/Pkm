@@ -3,7 +3,8 @@ import { ONLINE_SLOTS, type GameSymbols, type Ghost, type PlayerPosition } from 
 import { api } from './api';
 import { decodeCheckpoint, encodeCheckpoint } from './checkpoint';
 import { loadMeta, symbol, type Meta } from './meta';
-import { send, session, toast } from './session';
+import { linkHandlers, send, session, toast } from './session';
+import { VLINK_STATE, VLinkRelay, type VLinkSession } from './vlink';
 import { createStore } from './store';
 
 export type SaveStatus = 'none' | 'synced' | 'pending' | 'saving' | 'error';
@@ -100,6 +101,10 @@ export async function startGame(canvas: HTMLCanvasElement, forUser: number) {
       onlineSelf: meta.symbols.gOnlineSelf ? symbol(meta, 'gOnlineSelf') : undefined,
       onlinePlayers: meta.symbols.gOnlinePlayers ? symbol(meta, 'gOnlinePlayers') : undefined,
       onlineMagic: meta.symbols.gOnlinePlayersMagic ? symbol(meta, 'gOnlinePlayersMagic') : undefined,
+      vlink: meta.symbols.gVLink ? symbol(meta, 'gVLink') : undefined,
+      controllerFuncs: meta.symbols.gBattlerControllerFuncs ? symbol(meta, 'gBattlerControllerFuncs') : undefined,
+      inputHandlers: (meta.battleInput ?? []).map(a => (parseInt(a, 16) & ~1) >>> 0),
+      partyMenuCallback: meta.symbols.CB2_UpdatePartyMenu ? symbol(meta, 'CB2_UpdatePartyMenu') & ~1 : undefined,
     };
     emu = await Emulator.create(canvas);
     game.set({ progress: 'Tải ROM…' });
@@ -151,6 +156,7 @@ async function tick() {
     }
   }
   updateGhosts(pos);
+  reportBattleInput();
   const pkey = `${party.count}:${hash(party.data.subarray(0, party.count * 100))}`;
   const now = Date.now();
   if (party.count && pkey !== lastPartyKey && now - lastPartySent > 1500) {
@@ -266,7 +272,8 @@ async function captureCheckpoint(): Promise<Uint8Array | null> {
 /** Runs every 5 s: pushes the in-game save and a checkpoint of exactly where the player is. */
 async function autosave() {
   void uploadSave();
-  if (checkpointing || !emu || game.get().paused || session.get().battle) return;
+  // No checkpoints during a link battle: it cannot be resumed from a snapshot.
+  if (checkpointing || !emu || game.get().paused || session.get().battle || relay) return;
   checkpointing = true;
   try {
     const file = await captureCheckpoint();
@@ -288,6 +295,80 @@ async function autosave() {
     checkpointing = false;
   }
 }
+
+// ------------------------------------------------------------------ in-ROM link battles
+let relay: VLinkRelay | null = null;
+let relayTimer: number | undefined;
+let relayEndingSince = 0;
+
+function stopRelay() {
+  window.clearInterval(relayTimer);
+  relay?.stop();
+  relay = null;
+  relayEndingSince = 0;
+}
+
+linkHandlers.start = b => {
+  if (!emu || !sym?.vlink || !emu.mem) {
+    toast('Game chưa sẵn sàng cho trận đấu trong game (hãy vào game trước).', 'error');
+    send({ t: 'vlink_end', battle: b.id, outcome: 2 });
+    return;
+  }
+  stopRelay();
+  const s: VLinkSession = { battle: b.id, mpId: b.mpId, count: b.count, kind: b.kind as VLinkSession['kind'] };
+  relay = new VLinkRelay(
+    () => emu?.mem ?? null, sym.vlink, s,
+    data => send({ t: 'vlink_cmds', battle: s.battle, data }),
+    outcome => send({ t: 'vlink_end', battle: s.battle, outcome }),
+  );
+  relay.start();
+  toast('Trận đấu sẽ bắt đầu ngay khi nhân vật của bạn đứng tự do ngoài bản đồ.');
+  relayTimer = window.setInterval(() => {
+    if (!relay) return;
+    relay.pump();
+    const st = relay.state;
+    const rb = session.get().romBattle;
+    if (rb && rb.id === s.battle && rb.phase === 'starting' && st === VLINK_STATE.inBattle) {
+      session.set({ romBattle: { ...rb, phase: 'battle' } });
+    }
+    // After the result is in, keep pumping until the ROM is back in the overworld, then let go.
+    if (relayEndingSince && (st === VLINK_STATE.done || Date.now() - relayEndingSince > 15000)) stopRelay();
+  }, 8);
+};
+
+/** True while the ROM's battle UI waits for this player's choice (move, target, switch). */
+function waitingForInput(): boolean {
+  const mem = emu?.mem;
+  if (!mem || !sym?.controllerFuncs || !sym.inputHandlers?.length) return false;
+  for (let i = 0; i < 4; i++) {
+    const fn = (mem.u32(sym.controllerFuncs + i * 4) & ~1) >>> 0;
+    if (sym.inputHandlers.includes(fn)) return true;
+  }
+  return !!(sym.main && sym.partyMenuCallback && ((mem.u32(sym.main + 4) & ~1) >>> 0) === sym.partyMenuCallback);
+}
+
+let lastWaiting = false;
+function reportBattleInput() {
+  if (!relay || relay.state !== VLINK_STATE.inBattle) {
+    lastWaiting = false;
+    return;
+  }
+  const waiting = waitingForInput();
+  if (waiting !== lastWaiting) {
+    lastWaiting = waiting;
+    send({ t: 'vlink_input', battle: relay.session.battle, waiting });
+  }
+}
+
+linkHandlers.cmds = (battle, from, data) => {
+  if (relay && relay.session.battle === battle) relay.receive(from, data);
+};
+
+linkHandlers.end = (battle, won, reason) => {
+  if (!relay || relay.session.battle !== battle) return;
+  if (reason && relay.state !== VLINK_STATE.done) relay.forfeit(won);
+  relayEndingSince = Date.now();
+};
 
 export function setSpeed(speed: number) {
   if (!(SPEEDS as readonly number[]).includes(speed)) return;

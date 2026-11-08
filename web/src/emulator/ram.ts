@@ -171,6 +171,12 @@ export type GameSymbols = {
   onlineSelf?: number;
   onlinePlayers?: number;
   onlineMagic?: number;
+  /** Virtual link cable mailbox (rom-patch/src/online_link.c). */
+  vlink?: number;
+  /** Battle input detection for the AFK timer of in-ROM battles. */
+  controllerFuncs?: number;
+  inputHandlers?: number[];
+  partyMenuCallback?: number;
 };
 
 export type PlayerPosition = {

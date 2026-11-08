@@ -88,7 +88,7 @@ function BattleLog({ battle }: { battle: BattleView }) {
 }
 
 /** Seconds left to choose; at zero the server counts the player as AFK and they lose. */
-function Countdown({ deadline }: { deadline: number }) {
+export function Countdown({ deadline }: { deadline: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);

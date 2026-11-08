@@ -5,9 +5,9 @@ Trang web để chơi **pokeemerald-expansion** cùng bạn bè, hoàn toàn tr�
 - Mỗi người chơi bản game của riêng mình (mGBA chạy bằng WebAssembly), tự do theo cốt truyện hoặc đi đâu tuỳ thích. Không có ràng buộc nào giữa các người chơi.
 - **Thấy nhau ngay trong game**: khi đứng cùng bản đồ, nhân vật của bạn bè xuất hiện và đi lại trong thế giới game (đi bộ, đạp xe, lướt sóng đúng sprite), không chắn đường ai.
 - **Minimap**: thấy vị trí của nhau trên bản đồ vùng Hoenn, kèm radar những người đang ở cùng bản đồ.
-- **PVP**: thách đấu 1v1 (đấu đơn / đấu đôi) và phòng **đấu đội 2v2**, dùng chính đội hình đang có trong game. Có bảng xếp hạng thắng/thua.
+- **PVP ngay trong game**: thách đấu 1v1 (đấu đơn / đấu đôi) chạy bằng **chính engine trận đấu của ROM** qua một "cáp link ảo", đầy đủ hiệu ứng, nhạc và giao diện gốc như hai máy GBA nối cáp. Đội hình được trả lại nguyên vẹn sau trận. Phòng **đấu đội 2v2** và tuỳ chọn "mô phỏng nhanh" dùng simulator Pokémon Showdown. Có bảng xếp hạng thắng/thua.
 - **Không mất tiến trình**: cứ 5 giây trang tự tạo một điểm khôi phục (save state) và đồng bộ save trong game lên máy chủ. Bấm F5 hay quay lại sau, game tự mở và tiếp tục đúng chỗ cũ.
-- **Chống AFK trong PVP**: mỗi lượt có đồng hồ đếm ngược (mặc định 60 giây); ai không chọn kịp sẽ bị xử thua (đấu đội thì cả đội thua).
+- **Chống AFK trong PVP**: khi game chờ bạn chọn lệnh, đồng hồ đếm ngược hiện trên màn hình (mặc định 60 giây); ai không chọn kịp sẽ bị xử thua (đấu đội thì cả đội thua). Rời trang hoặc F5 giữa trận cũng tính là thua.
 - Chat chung, chỉnh tốc độ game (1x–4x) trong Cài đặt, điều khiển cảm ứng trên điện thoại.
 
 ## Cách hoạt động
@@ -25,6 +25,7 @@ Trình duyệt (mỗi người)                         Máy chủ (Docker)
 
 - **ROM** được build từ source ngay trong Docker (`make`), sau đó `tools/extract_assets.py` lấy ra: địa chỉ RAM (`gSaveBlock1Ptr`, `gParties`, `gMapHeader`…), bảng species/move/item, sprite, và ảnh bản đồ vùng cho minimap.
 - **Patch ROM** (`rom-patch/`): thêm `src/online_players.c` vào source trước khi build. Mỗi khung hình, ROM ghi trạng thái của chính người chơi vào `gOnlineSelf` và vẽ bạn bè từ bộ đệm `gOnlinePlayers` (tối đa 8 người cùng bản đồ) thành các nhân vật đi lại. Web ghi vị trí bạn bè vào bộ đệm đó qua bộ nhớ emulator; ROM không tự kết nối mạng.
+- **Cáp link ảo** (`rom-patch/src/online_link.c`): giao thức link gốc của ROM (gửi khối dữ liệu, đồng bộ, trao đổi thông tin người chơi) được giữ nguyên; chỉ phần trao đổi lệnh mỗi khung hình với chip serial (`LinkMain1`) được thay bằng hàng đợi trong RAM. Web chuyển các lệnh đó giữa hai người qua WebSocket. Trong trận link, một máy làm "chủ" tính toàn bộ trận, máy kia chỉ chạy hiệu ứng, nên độ trễ mạng chỉ làm chậm chứ không làm hai bên lệch nhau.
 - **Đọc RAM**: mgba-wasm không có API đọc bộ nhớ, nên web tạm dừng game, chụp một save state, rồi tìm đúng vùng IWRAM/EWRAM đó trong heap WebAssembly. Sau lần dò này, việc đọc vị trí và đội hình (4 lần/giây) gần như không tốn gì.
 - **PVP** dùng simulator của Pokémon Showdown (cơ chế Gen 9, hỗ trợ Mega/Tera như bản expansion). Đội hình được giải mã từ RAM, hồi đầy máu, và có thể quy về Lv 50 / Lv 100 hoặc giữ nguyên cấp. Khi vào trận PVP, game của bạn tự tạm dừng và chạy tiếp sau trận.
 
@@ -127,7 +128,8 @@ Nút ☰ ở góc trên trái mở menu (bản đồ, người chơi, đấu, ch
 
 ## Giới hạn hiện tại
 
-- PVP chạy trên simulator Showdown chứ không phải trận link trong ROM, nên một số chiêu/đặc tính tự chế riêng của bản hack (nếu có) sẽ không có trong PVP.
+- Trận trong game hiện hỗ trợ đấu đơn và đấu đôi 1v1. Phòng 2v2 (bốn người) vẫn dùng simulator Showdown, vì trận multi trong ROM cần thêm bước chọn 3 Pokémon cho mỗi người.
+- Trận trong game chỉ bắt đầu khi nhân vật của cả hai đang đứng tự do ngoài bản đồ (không trong hội thoại/menu). Trong trận không tạo điểm khôi phục.
 - Nhân vật bạn bè trong game là "bóng": không nói chuyện, đổi đồ hay đấu trực tiếp trong game được; PVP đi qua sảnh Đấu của trang web. Khi bạn bè lướt sóng, chỉ thấy tư thế lướt, không có thú cưỡi bên dưới.
 - Patch ROM được áp vào source upstream bằng các điểm neo cố định. Nếu bản expansion mới đổi các đoạn đó, bước build Docker sẽ dừng với thông báo rõ ràng thay vì âm thầm bỏ tính năng.
 - Mỗi tài khoản chỉ mở được một tab cùng lúc (tab mới sẽ ngắt tab cũ).

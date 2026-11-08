@@ -154,7 +154,7 @@ def test_presence_chat_and_pvp_battle(app_module):
             wb.send_json(party_payload(4))
             recv_until(wb, "party")
 
-            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50})
+            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50, "engine": "sim"})
             ch = recv_until(wb, "challenge")["challenge"]
             wb.send_json({"t": "challenge_reply", "id": ch["id"], "accept": True})
             start = recv_until(wa, "battle_start")["battle"]
@@ -219,7 +219,7 @@ def test_afk_player_loses(app_module, monkeypatch):
             b_id = recv_until(wb, "hello")["you"]["id"]
             wa.send_json(party_payload(25)); recv_until(wa, "party")
             wb.send_json(party_payload(4)); recv_until(wb, "party")
-            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50})
+            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50, "engine": "sim"})
             ch = recv_until(wb, "challenge")["challenge"]
             wb.send_json({"t": "challenge_reply", "id": ch["id"], "accept": True})
             bid = recv_until(wa, "battle_start")["battle"]["id"]
@@ -230,3 +230,52 @@ def test_afk_player_loses(app_module, monkeypatch):
             end = recv_until(wa, "battle_end")
             assert end["won"] is True and end["afk"] == "Afk_P"
             assert recv_until(wb, "battle_end")["won"] is False
+
+
+def test_rom_link_battle_relay_and_result(app_module):
+    with TestClient(app_module.app) as client:
+        a = make_client(client, "Rom_A")
+        b = make_client(client, "Rom_B")
+        with a.websocket_connect("/ws") as wa, b.websocket_connect("/ws") as wb:
+            recv_until(wa, "hello")
+            b_id = recv_until(wb, "hello")["you"]["id"]
+            wa.send_json(party_payload(25)); recv_until(wa, "party")
+            wb.send_json(party_payload(4)); recv_until(wb, "party")
+            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50})  # engine defaults to rom
+            ch = recv_until(wb, "challenge")["challenge"]
+            assert ch["engine"] == "rom"
+            wb.send_json({"t": "challenge_reply", "id": ch["id"], "accept": True})
+            sa = recv_until(wa, "vlink_start")["battle"]
+            sb = recv_until(wb, "vlink_start")["battle"]
+            assert (sa["mpId"], sb["mpId"], sa["count"]) == (0, 1, 2) and sa["id"] == sb["id"]
+            wa.send_json({"t": "vlink_cmds", "battle": sa["id"], "data": "AAAA"})
+            relayed = recv_until(wb, "vlink_cmds")
+            assert relayed["from"] == 0 and relayed["data"] == "AAAA"
+            wb.send_json({"t": "vlink_end", "battle": sa["id"], "outcome": 1})  # B won
+            assert recv_until(wa, "vlink_end")["won"] is False
+            assert recv_until(wb, "vlink_end")["won"] is True
+            board = {r["username"]: r for r in a.get("/api/leaderboard").json()}
+            assert board["Rom_B"]["wins"] == 1 and board["Rom_A"]["losses"] == 1
+
+
+def test_rom_battle_afk_player_loses(app_module, monkeypatch):
+    from app import hub as hub_module
+    monkeypatch.setattr(hub_module, "TURN_SECONDS", 1)
+    with TestClient(app_module.app) as client:
+        a = make_client(client, "RomAfk_A")
+        b = make_client(client, "RomAfk_B")
+        with a.websocket_connect("/ws") as wa, b.websocket_connect("/ws") as wb:
+            recv_until(wa, "hello")
+            b_id = recv_until(wb, "hello")["you"]["id"]
+            wa.send_json(party_payload(25)); recv_until(wa, "party")
+            wb.send_json(party_payload(4)); recv_until(wb, "party")
+            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50, "engine": "rom"})
+            ch = recv_until(wb, "challenge")["challenge"]
+            wb.send_json({"t": "challenge_reply", "id": ch["id"], "accept": True})
+            bid = recv_until(wa, "vlink_start")["battle"]["id"]
+            recv_until(wb, "vlink_start")
+            wb.send_json({"t": "vlink_input", "battle": bid, "waiting": True})
+            assert recv_until(wb, "vlink_deadline")["deadline"] > 0
+            end_a = recv_until(wa, "vlink_end")
+            assert end_a["won"] is True and end_a["reason"] == "afk"
+            assert recv_until(wb, "vlink_end")["won"] is False
