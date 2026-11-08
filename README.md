@@ -6,7 +6,9 @@ Trang web để chơi **pokeemerald-expansion** cùng bạn bè, hoàn toàn tr�
 - **Thấy nhau ngay trong game**: khi đứng cùng bản đồ, nhân vật của bạn bè xuất hiện và đi lại trong thế giới game (đi bộ, đạp xe, lướt sóng đúng sprite), không chắn đường ai.
 - **Minimap**: thấy vị trí của nhau trên bản đồ vùng Hoenn, kèm radar những người đang ở cùng bản đồ.
 - **PVP**: thách đấu 1v1 (đấu đơn / đấu đôi) và phòng **đấu đội 2v2**, dùng chính đội hình đang có trong game. Có bảng xếp hạng thắng/thua.
-- Chat chung, save **tự động đồng bộ** lên máy chủ, điều khiển cảm ứng trên điện thoại.
+- **Không mất tiến trình**: cứ 5 giây trang tự tạo một điểm khôi phục (save state) và đồng bộ save trong game lên máy chủ. Bấm F5 hay quay lại sau, game tự mở và tiếp tục đúng chỗ cũ.
+- **Chống AFK trong PVP**: mỗi lượt có đồng hồ đếm ngược (mặc định 60 giây); ai không chọn kịp sẽ bị xử thua (đấu đội thì cả đội thua).
+- Chat chung, chỉnh tốc độ game (1x–4x) trong Cài đặt, điều khiển cảm ứng trên điện thoại.
 
 ## Cách hoạt động
 
@@ -116,11 +118,12 @@ cd web && npm test
 | `INVITE_CODE` | trống | Mã mời khi đăng ký; trống = đăng ký tự do |
 | `ROM_REPO`, `ROM_REF` | rh-hideout / `master` | Source ROM để build |
 | `SESSION_DAYS` | 30 | Thời gian giữ đăng nhập |
+| `BATTLE_TURN_SECONDS` | 60 | Thời gian tối đa cho mỗi lượt PVP trước khi bị xử thua vì AFK |
 | `DATA_DIR` | `/data` | Nơi lưu SQLite (tài khoản, save) |
 
 ## Điều khiển
 
-Bàn phím: mũi tên di chuyển, `X` = A, `Z` = B, `A`/`S` = L/R, `Enter` = Start, `Backspace` = Select. Trên điện thoại có D-pad và nút A/B trên màn hình. Khi gõ chat, phím không truyền vào game.
+Nút ☰ ở góc trên trái mở menu (bản đồ, người chơi, đấu, chat, cài đặt); minimap ở góc trên phải kéo góc để phóng to. Bàn phím: mũi tên di chuyển, `X` = A, `Z` = B, `A`/`S` = L/R, `Enter` = Start, `Backspace` = Select. Trên điện thoại có D-pad và nút A/B trên màn hình. Khi gõ chat, phím không truyền vào game.
 
 ## Giới hạn hiện tại
 

@@ -360,7 +360,7 @@ a { color: var(--ink); text-underline-offset: 3px; }
 
 /* ---------------------------------------------------------------- battle */
 .battle {
-  position: absolute; inset: 0; z-index: 20; display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  position: absolute; inset: 0; z-index: 40; /* above the menu popup */ display: grid; grid-template-rows: minmax(0, 1fr) auto;
   background: var(--bg-deep); animation: battle-in 420ms var(--ease);
 }
 @keyframes battle-in { from { opacity: 0; clip-path: inset(48% 0 48% 0); } to { opacity: 1; clip-path: inset(0); } }
@@ -400,6 +400,15 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .battle-log .win { color: var(--accent); font-weight: 600; margin-top: 8px; }
 .controls { border-top: 1px solid var(--line); padding: 14px 20px; background: var(--bg); display: grid; gap: 12px; }
 .controls-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.controls-actions { display: flex; align-items: center; gap: 8px; }
+.countdown {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px;
+  font: 500 12px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--line);
+}
+.countdown svg { width: 13px; height: 13px; }
+.countdown.urgent { color: #ffd1c4; background: rgb(255 74 31 / 18%); border-color: rgb(255 74 31 / 60%); animation: pulse 1s var(--ease) infinite; }
+@keyframes pulse { 50% { opacity: 0.65; } }
 .moves { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .move-btn {
   display: grid; gap: 4px; text-align: left; padding: 10px 12px; border-radius: var(--r-md); cursor: pointer;

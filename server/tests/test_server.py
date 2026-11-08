@@ -206,3 +206,27 @@ def test_team_room_requires_four(app_module):
         finally:
             for s in socks:
                 s.__exit__(None, None, None)
+
+
+def test_afk_player_loses(app_module, monkeypatch):
+    from app import hub as hub_module
+    monkeypatch.setattr(hub_module, "TURN_SECONDS", 1)
+    with TestClient(app_module.app) as client:
+        a = make_client(client, "Active_P")
+        b = make_client(client, "Afk_P")
+        with a.websocket_connect("/ws") as wa, b.websocket_connect("/ws") as wb:
+            recv_until(wa, "hello")
+            b_id = recv_until(wb, "hello")["you"]["id"]
+            wa.send_json(party_payload(25)); recv_until(wa, "party")
+            wb.send_json(party_payload(4)); recv_until(wb, "party")
+            wa.send_json({"t": "challenge", "to": b_id, "format": "singles", "level": 50})
+            ch = recv_until(wb, "challenge")["challenge"]
+            wb.send_json({"t": "challenge_reply", "id": ch["id"], "accept": True})
+            bid = recv_until(wa, "battle_start")["battle"]["id"]
+            req = recv_until(wa, "battle_request")
+            assert req["deadline"] and req["deadline"] > 0
+            wa.send_json({"t": "choose", "battle": bid, "choice": "default"})
+            # Afk_P never answers
+            end = recv_until(wa, "battle_end")
+            assert end["won"] is True and end["afk"] == "Afk_P"
+            assert recv_until(wb, "battle_end")["won"] is False

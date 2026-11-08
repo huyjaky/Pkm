@@ -1,4 +1,4 @@
-import { Flag, X } from 'lucide-react';
+import { Flag, Timer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   hpPercent, needsTarget, parseCondition, parseDetails, targetOptions,
@@ -87,12 +87,31 @@ function BattleLog({ battle }: { battle: BattleView }) {
   );
 }
 
+/** Seconds left to choose; at zero the server counts the player as AFK and they lose. */
+function Countdown({ deadline }: { deadline: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, []);
+  const left = Math.max(0, Math.ceil((deadline - now) / 1000));
+  return (
+    <span className={`countdown ${left <= 10 ? 'urgent' : ''}`} role="timer" aria-live={left <= 10 ? 'assertive' : 'off'}
+      title="Hết giờ mà chưa chọn sẽ bị xử thua">
+      <Timer aria-hidden="true" /> {left}s
+    </span>
+  );
+}
+
 function Result({ battle }: { battle: BattleView }) {
   const won = battle.won;
   return (
     <div className={`result ${won ? 'win' : ''}`}>
       <h2>{battle.aborted ? 'Trận đấu đã huỷ' : won ? 'Chiến thắng!' : won === false ? 'Thất bại' : 'Kết thúc'}</h2>
-      <p className="muted">{battle.aborted ?? (battle.winner ? `${battle.winner} thắng sau ${battle.turn} lượt.` : 'Trận đấu đã kết thúc.')}</p>
+      <p className="muted">
+        {battle.aborted ?? (battle.afk ? `${battle.afk} không chọn kịp (AFK) nên bị xử thua.`
+          : battle.winner ? `${battle.winner} thắng sau ${battle.turn} lượt.` : 'Trận đấu đã kết thúc.')}
+      </p>
       <button className="btn primary" onClick={closeBattle}><X /> Quay lại game</button>
     </div>
   );
@@ -139,7 +158,10 @@ function Controls({ battle, meta }: { battle: BattleView; meta: Meta | null }) {
   const head = (title: string) => (
     <div className="controls-head">
       <h2>{title}</h2>
-      <button className="btn sm ghost danger" onClick={forfeit}><Flag /> Đầu hàng</button>
+      <div className="controls-actions">
+        {battle.deadline && <Countdown deadline={battle.deadline} />}
+        <button className="btn sm ghost danger" onClick={forfeit}><Flag /> Đầu hàng</button>
+      </div>
     </div>
   );
 

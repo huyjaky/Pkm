@@ -4,6 +4,8 @@ import { game, getEmulator, startGame } from '../lib/game';
 import { useStore } from '../lib/store';
 import { TouchPad } from './TouchPad';
 
+const PLAYING_KEY = 'hl-playing';
+
 /** Enter browser fullscreen; needs a user gesture, so it is called from a click. */
 export function enterFullscreen() {
   const el = document.documentElement;
@@ -16,6 +18,27 @@ export function GameStage({ userId }: { userId: number }) {
   const phase = useStore(game, s => s.phase);
   const progress = useStore(game, s => s.progress);
   const message = useStore(game, s => s.message);
+
+  // After F5 in a tab that was playing, start again right away (the checkpoint restores the game).
+  // Fullscreen and sound need a user gesture, so they come back on the first key press or tap.
+  useEffect(() => {
+    let wasPlaying = false;
+    try { wasPlaying = sessionStorage.getItem(PLAYING_KEY) === '1'; } catch { /* storage blocked */ }
+    if (!wasPlaying || !canvas.current) return;
+    void startGame(canvas.current, userId);
+    const resume = () => {
+      enterFullscreen();
+      getEmulator()?.core.resumeAudio();
+      window.removeEventListener('keydown', resume, true);
+      window.removeEventListener('pointerdown', resume, true);
+    };
+    window.addEventListener('keydown', resume, true);
+    window.addEventListener('pointerdown', resume, true);
+    return () => {
+      window.removeEventListener('keydown', resume, true);
+      window.removeEventListener('pointerdown', resume, true);
+    };
+  }, [userId]);
 
   // Typing in chat or forms must not move the player.
   useEffect(() => {
@@ -41,6 +64,7 @@ export function GameStage({ userId }: { userId: number }) {
                 <p>Game chạy toàn màn hình ngay trên trình duyệt. Save được tải từ máy chủ và tự đồng bộ mỗi 5 giây.</p>
                 <button className="btn primary" onClick={() => {
                   enterFullscreen();
+                  try { sessionStorage.setItem(PLAYING_KEY, '1'); } catch { /* storage blocked */ }
                   if (canvas.current) void startGame(canvas.current, userId);
                 }}>
                   <Play aria-hidden="true" /> Bắt đầu chơi

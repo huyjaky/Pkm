@@ -42,6 +42,9 @@ export type BattleView = {
   won: boolean | null;
   winner: string;
   aborted?: string;
+  /** Epoch ms by which the current request must be answered, or the player loses (AFK). */
+  deadline: number | null;
+  afk?: string | null;
 };
 
 export type RequestMove = { move: string; id: string; pp: number; maxpp: number; target: string; disabled?: boolean };
@@ -109,7 +112,7 @@ function ident(id: string) {
 export function newBattle(info: Pick<BattleView, 'id' | 'format' | 'level' | 'mySlot' | 'players' | 'colors'>): BattleView {
   return {
     ...info, active: {}, turn: 0, weather: '', log: [], request: null, waiting: false,
-    error: '', ended: false, won: null, winner: '',
+    error: '', ended: false, won: null, winner: '', deadline: null,
   };
 }
 

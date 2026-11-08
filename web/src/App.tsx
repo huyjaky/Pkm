@@ -32,6 +32,7 @@ export function App() {
           user={user}
           onLogout={async () => {
             await api.logout().catch(() => undefined);
+            try { sessionStorage.removeItem('hl-playing'); } catch { /* storage blocked */ }
             location.reload();
           }}
         />

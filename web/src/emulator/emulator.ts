@@ -7,6 +7,9 @@ import {
 
 const ROM_PATH = '/data/games/hoenn-link.gba';
 const CALIBRATION_SLOT = 9;
+const CHECKPOINT_SLOT = 1;
+// mGBA SAVESTATE_* flags: SAVEDATA (2) keeps the flash save consistent with the state, RTC (8) the clock.
+const CHECKPOINT_FLAGS = 2 | 8;
 
 export type GbaButton = 'a' | 'b' | 'l' | 'r' | 'start' | 'select' | 'up' | 'down' | 'left' | 'right';
 
@@ -14,6 +17,7 @@ export type GbaButton = 'a' | 'b' | 'l' | 'r' | 'start' | 'select' | 'up' | 'dow
 type Core = mGBAEmulator & {
   HEAPU8: Uint8Array;
   saveStateSlot(slot: number, flags?: number): boolean;
+  loadStateSlot(slot: number, flags?: number): boolean;
 };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -142,6 +146,40 @@ export class Emulator {
     if (Date.now() - this.lastCalibration < 15000) return null;
     this.calibrating = this.calibrate().finally(() => { this.calibrating = null; });
     return (await this.calibrating) ? this.memory : null;
+  }
+
+  // ------------------------------------------------------------------ checkpoints
+  private statePath(slot: number) {
+    const base = ROM_PATH.split('/').pop()!.replace(/\.gba$/, '');
+    return `${this.mod.filePaths().saveStatePath}/${base}.ss${slot}`;
+  }
+
+  /** Full emulator snapshot (raw mGBA save state) of the running game. */
+  captureCheckpoint(): Uint8Array | null {
+    const wasPaused = this.paused;
+    try {
+      if (!wasPaused) this.mod.pauseGame();
+      if (!this.mod.saveStateSlot(CHECKPOINT_SLOT, CHECKPOINT_FLAGS)) return null;
+      return this.mod.FS.readFile(this.statePath(CHECKPOINT_SLOT)) as Uint8Array;
+    } catch (e) {
+      console.warn('[checkpoint] capture failed', e);
+      return null;
+    } finally {
+      if (!wasPaused && !this.paused) this.mod.resumeGame();
+    }
+  }
+
+  /** Resumes exactly where a checkpoint was taken. */
+  restoreCheckpoint(state: Uint8Array): boolean {
+    try {
+      this.mod.FS.writeFile(this.statePath(CHECKPOINT_SLOT), state);
+      const ok = this.mod.loadStateSlot(CHECKPOINT_SLOT, CHECKPOINT_FLAGS);
+      this.memory = null; // RAM contents changed; re-verify the offsets
+      return ok;
+    } catch (e) {
+      console.warn('[checkpoint] restore failed', e);
+      return false;
+    }
   }
 
   /** Shows friends in the overworld (needs the rom-patch symbols). */

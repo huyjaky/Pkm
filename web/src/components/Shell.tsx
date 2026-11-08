@@ -1,10 +1,10 @@
 import {
-  CloudCheck, CloudOff, CloudUpload, LogOut, Map, Maximize, Menu, MessagesSquare, Minimize, Pause, Play,
+  CloudCheck, CloudOff, CloudUpload, Gauge, History, LogOut, Map, Maximize, Menu, MessagesSquare, Minimize, Pause, Play,
   Settings, Swords, Users, Volume2, VolumeX, Wifi, WifiOff, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api, type User } from '../lib/api';
-import { game, setGameKeyboard, setVolume, togglePause } from '../lib/game';
+import { game, setGameKeyboard, setSpeed, setVolume, SPEEDS, togglePause } from '../lib/game';
 import { send, session } from '../lib/session';
 import { useStore } from '../lib/store';
 import { BattleScreen } from './BattleScreen';
@@ -39,6 +39,12 @@ export function Shell({ user, onLogout }: { user: User; onLogout: () => void }) 
   const battle = useStore(session, s => s.battle);
   const connected = useStore(session, s => s.connected);
   const phase = useStore(game, s => s.phase);
+  const battleId = battle?.id;
+
+  // A battle takes over the screen: close the menu so nothing hides it.
+  useEffect(() => {
+    if (battleId) setOpen(null);
+  }, [battleId]);
 
   // Arrow keys belong to the popup while it is open.
   useEffect(() => {
@@ -128,6 +134,8 @@ function SettingsPanel({ user, onLogout }: { user: User; onLogout: () => void })
   const paused = useStore(game, s => s.paused);
   const save = useStore(game, s => s.save);
   const savedAt = useStore(game, s => s.savedAt);
+  const speed = useStore(game, s => s.speed);
+  const checkpointAt = useStore(game, s => s.checkpointAt);
   const [record, setRecord] = useState({ wins: user.wins, losses: user.losses });
   const [full, setFull] = useState(!!document.fullscreenElement);
 
@@ -164,10 +172,27 @@ function SettingsPanel({ user, onLogout }: { user: User; onLogout: () => void })
             <saveInfo.icon aria-hidden="true" />
             <span>{saveInfo.text}</span>
           </div>
+          <div className="setting">
+            <History aria-hidden="true" />
+            <span>
+              {checkpointAt
+                ? `Điểm khôi phục tự động lúc ${new Date(checkpointAt * 1000).toLocaleTimeString('vi-VN')} (F5 sẽ quay lại đây)`
+                : 'Điểm khôi phục được tạo tự động mỗi 5 giây'}
+            </span>
+          </div>
         </div>
       </section>
       <section className="panel-section">
         <h2>Âm thanh và hiển thị</h2>
+        <div className="setting">
+          <Gauge aria-hidden="true" />
+          <span>Tốc độ game</span>
+          <div className="seg" role="group" aria-label="Tốc độ game" style={{ marginLeft: 'auto' }}>
+            {SPEEDS.map(v => (
+              <button key={v} aria-pressed={speed === v} onClick={() => setSpeed(v)}>{v}x</button>
+            ))}
+          </div>
+        </div>
         <div className="setting">
           <button className="btn sm icon ghost" aria-label={volume ? 'Tắt tiếng' : 'Bật tiếng'} onClick={() => setVolume(volume ? 0 : 0.8)}>
             {volume ? <Volume2 /> : <VolumeX />}

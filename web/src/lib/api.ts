@@ -48,5 +48,18 @@ export const api = {
       headers: { 'Content-Type': 'application/octet-stream' },
       body: data as BodyInit,
     }),
+  /** Auto checkpoint (compressed save state), see lib/checkpoint.ts. */
+  async getState(): Promise<{ data: Uint8Array; savedAt: number } | null> {
+    const res = await fetch('/api/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new ApiError(res.status, `Không tải được checkpoint (${res.status})`);
+    return { data: new Uint8Array(await res.arrayBuffer()), savedAt: Number(res.headers.get('X-Saved-At')) || 0 };
+  },
+  putState: (data: Uint8Array) =>
+    request<{ savedAt: number }>('/api/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: data as BodyInit,
+    }),
   leaderboard: () => request<{ id: number; username: string; color: string; wins: number; losses: number }[]>('/api/leaderboard'),
 };

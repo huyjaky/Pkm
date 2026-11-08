@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     environment:
       INVITE_CODE: ${INVITE_CODE:-}
+      BATTLE_TURN_SECONDS: ${BATTLE_TURN_SECONDS:-60}
       COOKIE_SECURE: "1"
       SESSION_DAYS: ${SESSION_DAYS:-30}
     volumes:

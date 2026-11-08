@@ -124,7 +124,7 @@ function handle(m: any) {
     break;
   case 'battle_resume': {
     const b = applyLines(newBattle(m.battle), m.lines);
-    session.set({ battle: { ...b, request: m.request ?? null, waiting: !m.request } });
+    session.set({ battle: { ...b, request: m.request ?? null, waiting: !m.request, deadline: m.deadline ?? null } });
     break;
   }
   case 'battle_log':
@@ -133,7 +133,7 @@ function handle(m: any) {
   case 'battle_request':
     if (b) {
       const req = m.request as ShowdownRequest;
-      session.set({ battle: { ...b, request: req.wait ? null : req, waiting: !!req.wait, error: '' } });
+      session.set({ battle: { ...b, request: req.wait ? null : req, waiting: !!req.wait, error: '', deadline: m.deadline ?? null } });
     }
     break;
   case 'battle_error':
@@ -143,7 +143,7 @@ function handle(m: any) {
     break;
   case 'battle_end':
     if (b) {
-      session.set({ battle: { ...b, ended: true, won: m.won ?? null, winner: m.winner, aborted: m.aborted, request: null } });
+      session.set({ battle: { ...b, ended: true, won: m.won ?? null, winner: m.winner, aborted: m.aborted, afk: m.afk, request: null, deadline: null } });
       if (m.aborted) toast(`Trận đấu bị huỷ: ${m.aborted}`, 'error');
     }
     break;
@@ -160,7 +160,7 @@ export function choose(choice: string) {
   if (!b) return;
   lastRequest = b.request;
   send({ t: 'choose', battle: b.id, choice });
-  session.set({ battle: { ...b, request: null, waiting: true, error: '' } });
+  session.set({ battle: { ...b, request: null, waiting: true, error: '', deadline: null } });
 }
 
 export function closeBattle() {

@@ -6,6 +6,7 @@ import base64
 import binascii
 import itertools
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,6 +22,8 @@ log = logging.getLogger("hub")
 FORMATS = {"singles", "doubles"}
 LEVEL_RULES = {0, 50, 100}
 DISCONNECT_FORFEIT_SECONDS = 90
+# A player who does not answer a battle request in time loses (AFK).
+TURN_SECONDS = int(os.environ.get("BATTLE_TURN_SECONDS", "60"))
 CHALLENGE_TTL_SECONDS = 60
 PRESENCE_INTERVAL = 0.25
 CHAT_MAX = 300
@@ -93,6 +96,9 @@ class BattleState:
     logs: dict[str, list[str]] = field(default_factory=dict)  # slot or "spectator" -> lines
     requests: dict[str, Any] = field(default_factory=dict)
     answered: dict[str, Any] = field(default_factory=dict)  # last request a choice was sent for
+    deadlines: dict[str, float] = field(default_factory=dict)  # slot -> epoch seconds
+    timers: dict[str, asyncio.Task] = field(default_factory=dict)
+    afk: str = ""  # name of the player who timed out
     teams: dict[str, Any] = field(default_factory=dict)
     ended: bool = False
     started: float = field(default_factory=time.time)
@@ -436,6 +442,7 @@ class Hub:
 
     async def _abort_battle(self, b: BattleState, reason: str) -> None:
         b.ended = True
+        self._cancel_all_timers(b)
         try:
             await self.engine.send({"cmd": "destroy", "id": b.id})
         except RuntimeError:
@@ -456,7 +463,44 @@ class Hub:
         await self.send(user_id, {
             "t": "battle_resume", "battle": info, "lines": b.logs.get(slot, []),
             "request": b.requests.get(slot), "teams": b.teams.get(slot),
+            "deadline": self._deadline_ms(b, slot),
         })
+
+    # turn timer ------------------------------------------------------------------
+    @staticmethod
+    def _deadline_ms(b: BattleState, slot: str) -> int | None:
+        d = b.deadlines.get(slot)
+        return int(d * 1000) if d and slot in b.requests else None
+
+    def _arm_timer(self, b: BattleState, slot: str, seconds: float | None = None) -> None:
+        seconds = TURN_SECONDS if seconds is None else seconds
+        self._cancel_timer(b, slot)
+        b.deadlines[slot] = time.time() + seconds
+        b.timers[slot] = asyncio.create_task(self._turn_timeout(b, slot, seconds))
+
+    def _cancel_timer(self, b: BattleState, slot: str) -> None:
+        task = b.timers.pop(slot, None)
+        if task and task is not asyncio.current_task():
+            task.cancel()
+        b.deadlines.pop(slot, None)
+
+    def _cancel_all_timers(self, b: BattleState) -> None:
+        for slot in list(b.timers):
+            self._cancel_timer(b, slot)
+
+    async def _turn_timeout(self, b: BattleState, slot: str, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+        if b.ended or slot not in b.requests:
+            return  # answered in time
+        b.afk = b.names.get(slot, slot)
+        log.info("battle %s: %s timed out (AFK)", b.id, b.afk)
+        for uid in b.slots.values():
+            await self.send(uid, {"t": "battle_log", "battle": b.id,
+                                  "lines": [f"|message|{b.afk} không chọn trong {TURN_SECONDS} giây (AFK) và bị xử thua."]})
+        try:
+            await self.engine.send({"cmd": "forfeit", "id": b.id, "slot": slot})
+        except RuntimeError:
+            await self._abort_battle(b, "Máy chủ trận đấu chưa sẵn sàng")
 
     async def on_choose(self, p: Player, m: dict) -> None:
         b = self.battles.get(str(m.get("battle")))
@@ -503,9 +547,16 @@ class Hub:
                 await self.send(uid, {"t": "battle_log", "battle": b.id, "lines": views.get(s, [])})
         elif kind == "request":
             slot = evt["slot"]
-            b.requests[slot] = evt["request"]
+            req = evt["request"]
             b.answered.pop(slot, None)
-            await self.send(b.slots[slot], {"t": "battle_request", "battle": b.id, "request": evt["request"]})
+            if req.get("wait"):
+                b.requests.pop(slot, None)
+                self._cancel_timer(b, slot)
+            else:
+                b.requests[slot] = req
+                self._arm_timer(b, slot)
+            await self.send(b.slots[slot], {"t": "battle_request", "battle": b.id, "request": req,
+                                            "deadline": self._deadline_ms(b, slot)})
         elif kind == "teams":
             b.teams = evt.get("teams", {})
             for s, uid in b.slots.items():
@@ -515,6 +566,9 @@ class Hub:
             if slot:
                 if slot in b.answered:  # choice rejected: the request is still open
                     b.requests[slot] = b.answered.pop(slot)
+                    remaining = b.deadlines.get(slot, 0) - time.time()
+                    if slot not in b.timers or b.timers[slot].done():
+                        self._arm_timer(b, slot, max(remaining, 15))
                 await self.send(b.slots[slot], {"t": "battle_error", "battle": b.id, "message": evt.get("message", "")})
             elif not b.ended:
                 await self._abort_battle(b, evt.get("message", "Lỗi trận đấu"))
@@ -523,6 +577,7 @@ class Hub:
 
     async def _finish_battle(self, b: BattleState, winner_name: str) -> None:
         b.ended = True
+        self._cancel_all_timers(b)
         win_slot = next((s for s, n in b.names.items() if n == winner_name), None)
         win_side = b.side_of(win_slot) if win_slot else None
         if win_side:
@@ -531,7 +586,7 @@ class Hub:
             self.db.record_result(winners, losers)
         for s, uid in b.slots.items():
             await self.send(uid, {"t": "battle_end", "battle": b.id, "winner": winner_name,
-                                  "won": bool(win_side and b.side_of(s) == win_side)})
+                                  "won": bool(win_side and b.side_of(s) == win_side), "afk": b.afk or None})
             if (pl := self.players.get(uid)) and pl.battle_id == b.id:
                 pl.battle_id = None
         try:
