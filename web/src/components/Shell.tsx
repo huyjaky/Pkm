@@ -10,7 +10,8 @@ import { useStore } from '../lib/store';
 import { BattleScreen } from './BattleScreen';
 import { ChatPanel } from './ChatPanel';
 import { enterFullscreen, GameStage } from './GameStage';
-import { MapPanel, RegionMap } from './MapPanel';
+import { HudMinimap } from './HudMinimap';
+import { MapPanel } from './MapPanel';
 import { PlayersPanel } from './PlayersPanel';
 import { PvpPanel } from './PvpPanel';
 
@@ -67,9 +68,7 @@ export function Shell({ user, onLogout }: { user: User; onLogout: () => void }) 
           {badge > 0 && <span className="badge">{badge}</span>}
         </button>
         {phase === 'running' && (
-          <button className="hud-map" onClick={() => setOpen('map')} aria-label="Mở bản đồ">
-            <RegionMap compact />
-          </button>
+          <HudMinimap onOpen={() => setOpen('map')} />
         )}
       </div>
 

@@ -178,10 +178,22 @@ a { color: var(--ink); text-underline-offset: 3px; }
 .hud-dot { position: absolute; bottom: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--bg); }
 .hud-map {
   position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
-  width: clamp(132px, 17vw, 232px); padding: 0; border: 0; background: none; cursor: pointer;
-  opacity: 0.78; transition: opacity 200ms var(--ease), transform 160ms var(--ease);
+  opacity: 0.78; transition: opacity 200ms var(--ease);
 }
-.hud-map:hover, .hud-map:focus-visible { opacity: 1; transform: translateY(-1px); }
+.hud-map:hover, .hud-map:focus-within, .hud-map.resizing { opacity: 1; }
+.hud-map-open { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; border-radius: var(--r-md); }
+.hud-map.resizing .hud-map-open { pointer-events: none; }
+.hud-map-handle {
+  position: absolute; left: -10px; bottom: -10px; width: 26px; height: 26px; border-radius: 8px;
+  display: grid; place-items: center; cursor: nesw-resize; touch-action: none;
+  background: rgb(24 25 27 / 90%); color: var(--ink-2); border: 1px solid rgb(255 255 255 / 22%);
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 70%);
+  opacity: 0; transition: opacity 160ms var(--ease), color 160ms, border-color 160ms, transform 160ms var(--ease);
+}
+.hud-map-handle svg { width: 12px; height: 12px; }
+.hud-map:hover .hud-map-handle, .hud-map.resizing .hud-map-handle, .hud-map-handle:focus-visible { opacity: 1; }
+.hud-map-handle:hover, .hud-map.resizing .hud-map-handle { color: var(--accent); border-color: var(--accent); transform: scale(1.08); }
+@media (pointer: coarse) { .hud-map-handle { opacity: 0.85; width: 32px; height: 32px; left: -12px; bottom: -12px; } }
 .minimap.compact { border-color: rgb(255 255 255 / 18%); box-shadow: 0 8px 24px -8px rgb(0 0 0 / 80%); }
 .minimap.compact .marker { width: 9px; height: 9px; border-width: 1.5px; }
 
@@ -264,7 +276,7 @@ a { color: var(--ink); text-underline-offset: 3px; }
 
 /* minimap */
 .minimap { position: relative; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line); background: #0b1a2a; }
-.minimap img { display: block; width: 100%; image-rendering: pixelated; }
+.minimap img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 .marker {
   position: absolute; transform: translate(-50%, -50%); width: 12px; height: 12px; border-radius: 50%;
   border: 2px solid #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 60%); transition: left 400ms var(--ease), top 400ms var(--ease);
