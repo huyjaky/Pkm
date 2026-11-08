@@ -28,13 +28,14 @@ type State = {
   battles: BattleSummary[];
   chat: ChatEntry[];
   unread: number;
+  chatOpen: boolean;
   party: PartyMon[];
   battle: BattleView | null;
   toasts: Toast[];
 };
 
 export const session = createStore<State>({
-  connected: false, me: null, players: [], challenges: [], rooms: [], battles: [], chat: [], unread: 0,
+  connected: false, me: null, players: [], challenges: [], rooms: [], battles: [], chat: [], unread: 0, chatOpen: false,
   party: [], battle: null, toasts: [],
 });
 
@@ -92,7 +93,12 @@ function handle(m: any) {
     session.set({ players: m.players, me: m.players.find((p: OnlinePlayer) => p.id === s.me?.id) ?? s.me });
     break;
   case 'chat':
-    session.set({ chat: [...s.chat, m].slice(-100), unread: m.from === s.me?.id ? s.unread : s.unread + 1 });
+    {
+      const mine = m.from === s.me?.id;
+      session.set({ chat: [...s.chat, m].slice(-100), unread: mine || s.chatOpen ? s.unread : s.unread + 1 });
+      // The chat lives in a popup now, so surface new messages over the game.
+      if (!mine && !s.chatOpen) toast(`${m.name}: ${m.text}`);
+    }
     break;
   case 'party':
     session.set({ party: m.mons });

@@ -35,7 +35,7 @@ export const api = {
   register: (username: string, password: string, invite?: string) =>
     request<User>('/api/auth/register', json({ username, password, invite })),
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
-  rom: () => request<ArrayBuffer>('/api/rom'),
+  rom: (version = '') => request<ArrayBuffer>(version ? `/api/rom?v=${encodeURIComponent(version)}` : '/api/rom'),
   async getSave(): Promise<{ data: Uint8Array; savedAt: number } | null> {
     const res = await fetch('/api/save', { credentials: 'same-origin' });
     if (res.status === 404) return null;

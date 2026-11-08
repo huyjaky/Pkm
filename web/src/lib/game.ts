@@ -17,18 +17,19 @@ type GameState = {
   pos: PlayerPosition | null;
   paused: boolean;
   volume: number;
-  speed: 1 | 2 | 4;
 };
 
 export const game = createStore<GameState>({
   phase: 'idle', message: '', progress: '', save: 'none', savedAt: null, ram: 'waiting', pos: null,
-  paused: false, volume: 0.8, speed: 1,
+  paused: false, volume: 0.8,
 });
 
 let emu: Emulator | null = null;
 let meta: Meta | null = null;
 let sym: GameSymbols | null = null;
-let saveTimer: number | undefined;
+let lastUploadedHash = -1;
+let uploading = false;
+const SAVE_SYNC_MS = 5000;
 let lastPosKey = '';
 let lastPartyKey = '';
 let lastPartySent = 0;
@@ -47,6 +48,13 @@ function markLocalSave() {
 }
 
 export const getEmulator = () => emu;
+
+// Debug handle for local testing: localStorage.hlDebug = '1'
+try {
+  if (import.meta.env.DEV || localStorage.getItem('hlDebug') === '1') {
+    (window as unknown as Record<string, unknown>).__hlGame = { getEmulator, game, getSymbols: () => sym };
+  }
+} catch { /* storage blocked */ }
 
 function toBase64(bytes: Uint8Array) {
   let s = '';
@@ -81,17 +89,19 @@ export async function startGame(canvas: HTMLCanvasElement, forUser: number) {
     };
     emu = await Emulator.create(canvas);
     game.set({ progress: 'Tải ROM…' });
-    const [rom, cloud] = await Promise.all([api.rom(), api.getSave()]);
+    const [rom, cloud] = await Promise.all([api.rom(meta.romHash), api.getSave()]);
     game.set({ progress: 'Nạp dữ liệu save…' });
     const { usedLocalSave } = await emu.boot(rom, cloud, userId, localSavedAt());
     emu.setVolume(game.get().volume);
-    emu.onSaveChanged(scheduleUpload);
+    emu.setFastForward(1);
+    emu.onSaveChanged(onSaveChanged);
+    if (cloud && !usedLocalSave) lastUploadedHash = hash(cloud.data);
     game.set({ phase: 'running', progress: '', save: cloud ? 'synced' : 'none', paused: false });
-    if (usedLocalSave) {
-      toast('Đã dùng bản save mới hơn lưu trên trình duyệt này và tải lên máy chủ.');
-      scheduleUpload();
-    }
+    if (usedLocalSave) toast('Đã dùng bản save mới hơn lưu trên trình duyệt này và tải lên máy chủ.');
     window.setInterval(tick, 250);
+    // Every player's save is pushed to the server every 5 s whenever it changed.
+    window.setInterval(() => void uploadSave(), SAVE_SYNC_MS);
+    void uploadSave();
     window.addEventListener('beforeunload', flushSave);
     document.addEventListener('visibilitychange', () => { if (document.hidden) flushSave(); });
   } catch (e) {
@@ -101,7 +111,10 @@ export async function startGame(canvas: HTMLCanvasElement, forUser: number) {
 }
 
 async function tick() {
-  if (!emu || !sym || game.get().paused) return;
+  if (!emu || !sym) return;
+  // The game always runs at normal GBA speed; players cannot fast-forward.
+  if (emu.fastForward !== 1) emu.setFastForward(1);
+  if (game.get().paused) return;
   const data = await emu.read(sym);
   if (!data) {
     failedReads++;
@@ -135,7 +148,7 @@ function updateGhosts(myPos: PlayerPosition | null) {
   const { players, me } = session.get();
   const here = myPos ?? game.get().pos;
   const friends = here ? players.filter(p => p.id !== me?.id && p.online && !p.inBattle && p.pos
-    && p.pos.group === here.group && p.pos.num === here.num && p.pos.gfx) : [];
+    && p.pos.group === here.group && p.pos.num === here.num && typeof p.pos.gfx === 'number') : [];
   const ids = new Set(friends.map(f => f.id));
   for (const id of [...ghostSlots.keys()]) if (!ids.has(id)) ghostSlots.delete(id);
   const slots: (Ghost | null)[] = Array(ONLINE_SLOTS).fill(null);
@@ -160,33 +173,41 @@ export function resendState() {
   lastPartySent = 0;
 }
 
-function scheduleUpload() {
+/** The game wrote its save (player saved in-game): keep a local copy right away. */
+function onSaveChanged() {
   game.set({ save: 'pending' });
   markLocalSave();
   void emu?.persistLocal();
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(uploadSave, 1500);
 }
 
+let errorShown = false;
 async function uploadSave() {
-  if (!emu) return;
+  if (!emu || uploading) return;
   const data = emu.getSave();
   if (!data || !data.length) return;
+  const h = hash(data);
+  if (h === lastUploadedHash) return;
+  uploading = true;
   game.set({ save: 'saving' });
   try {
     const { savedAt } = await api.putSave(data);
+    lastUploadedHash = h;
+    errorShown = false;
     game.set({ save: 'synced', savedAt });
     void emu.persistLocal();
   } catch (e) {
     game.set({ save: 'error' });
-    toast(`Không lưu được lên máy chủ: ${e instanceof Error ? e.message : e}`, 'error');
+    if (!errorShown) toast(`Không lưu được lên máy chủ: ${e instanceof Error ? e.message : e}`, 'error');
+    errorShown = true; // retried automatically every 5 s
+  } finally {
+    uploading = false;
   }
 }
 
 function flushSave() {
-  if (game.get().save !== 'pending' || !emu) return;
+  if (!emu) return;
   const data = emu.getSave();
-  if (data) {
+  if (data && hash(data) !== lastUploadedHash) {
     // A flash save (128 KB) is over the 64 KB keepalive limit, so this only completes while the page
     // is still alive (tab hidden). On a real close the newer IndexedDB copy wins at the next boot.
     void fetch('/api/save', { method: 'PUT', body: data as BodyInit, credentials: 'same-origin' })
@@ -207,15 +228,9 @@ export function setVolume(volume: number) {
   game.set({ volume });
 }
 
-export function cycleSpeed() {
-  const next = ({ 1: 2, 2: 4, 4: 1 } as const)[game.get().speed];
-  emu?.setFastForward(next);
-  game.set({ speed: next });
-}
-
-export function saveNow() {
-  window.clearTimeout(saveTimer);
-  void uploadSave();
+/** Keyboard goes to the game only while no popup or text field has focus. */
+export function setGameKeyboard(enabled: boolean) {
+  emu?.setKeyboard(enabled);
 }
 
 /** PvP battles pause the player's own game and resume it afterwards. */

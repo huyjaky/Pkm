@@ -40,20 +40,23 @@ export async function extractState(file: Uint8Array): Promise<Uint8Array> {
 
 /** Pick a probe window inside `block` that is distinctive (many different byte values). */
 export function pickProbe(block: Uint8Array, size = 48): number {
-  let best = -1;
-  let bestScore = 0;
-  for (let off = 0; off + size <= block.length; off += 256) {
-    if (block[off] === 0 || block[off] === 0xff) continue;
-    const seen = new Set<number>();
-    for (let i = 0; i < size; i++) seen.add(block[off + i]);
-    if (seen.size > bestScore) {
-      bestScore = seen.size;
-      best = off;
-      if (seen.size >= size * 0.75) break;
+  // Right after boot most of RAM is still zero, so scan densely and fall back to a full scan.
+  for (const step of [16, 1]) {
+    let best = -1;
+    let bestScore = 0;
+    for (let off = 0; off + size <= block.length; off += step) {
+      if (block[off] === 0 || block[off] === 0xff) continue;
+      const seen = new Set<number>();
+      for (let i = 0; i < size; i++) seen.add(block[off + i]);
+      if (seen.size > bestScore) {
+        bestScore = seen.size;
+        best = off;
+        if (seen.size >= size * 0.75) return best;
+      }
     }
+    if (best >= 0 && bestScore >= 8) return best;
   }
-  if (best < 0) throw new Error('memory block has no distinctive bytes');
-  return best;
+  throw new Error('memory block has no distinctive bytes');
 }
 
 function similarity(heap: Uint8Array, at: number, block: Uint8Array): number {

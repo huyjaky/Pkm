@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -220,6 +221,7 @@ def main() -> int:
             print("ERROR: pokeemerald.gba not found - build the ROM first", file=sys.stderr)
             return 1
         shutil.copyfile(rom, out / "rom.gba")
+    rom_hash = hashlib.sha1((out / "rom.gba").read_bytes()).hexdigest() if (out / "rom.gba").exists() else ""
 
     symbols = read_symbols(repo, args.nm)
 
@@ -269,6 +271,8 @@ def main() -> int:
     maps = map_names(repo)
     meta = {
         "version": 1,
+        # Clients fetch /api/rom?v=<romHash>, so a rebuilt ROM is never mixed with stale symbols.
+        "romHash": rom_hash,
         "symbols": {k: f"0x{v:08X}" for k, v in symbols.items()},
         "layout": {
             "partyMonSize": 100,

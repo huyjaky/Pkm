@@ -6,16 +6,13 @@ import { placeName, regionPoint, useMeta } from '../lib/useMeta';
 
 const RADAR_RANGE = 12; // tiles from you to the radar edge
 
-export function MapPanel() {
+/** Hoenn region map with a marker per online player. `compact` is the always-on HUD version. */
+export function RegionMap({ compact = false }: { compact?: boolean }) {
   const meta = useMeta();
   const players = useStore(session, s => s.players);
   const me = useStore(session, s => s.me);
   const myPos = useStore(game, s => s.pos);
-  const party = useStore(session, s => s.party);
-  const phase = useStore(game, s => s.phase);
-
   const others = players.filter(p => p.id !== me?.id && p.pos && p.online);
-  const sameMap = myPos ? others.filter(p => p.pos!.group === myPos.group && p.pos!.num === myPos.num) : [];
   const w = meta?.regionMap.width ?? 248;
   const h = meta?.regionMap.height ?? 152;
 
@@ -32,6 +29,30 @@ export function MapPanel() {
   }
 
   return (
+    <div className={`minimap ${compact ? 'compact' : ''}`} role="img" aria-label="Bản đồ vùng Hoenn với vị trí người chơi">
+      <img src="/game/region_map.png" alt="" width={w} height={h} />
+      {markers.map(m => (
+        <div key={m.p.id} className={`marker ${m.me ? 'me' : ''}`}
+          style={{ left: `${(m.x / w) * 100}%`, top: `${(m.y / h) * 100}%`, background: m.p.color, color: m.p.color, zIndex: m.me ? 3 : 2 }}
+          title={`${m.p.name} — ${placeName(meta, m.p.pos)}`}>
+          {!m.me && !compact && <span className="marker-label">{m.p.name}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function MapPanel() {
+  const meta = useMeta();
+  const players = useStore(session, s => s.players);
+  const me = useStore(session, s => s.me);
+  const myPos = useStore(game, s => s.pos);
+  const party = useStore(session, s => s.party);
+  const phase = useStore(game, s => s.phase);
+  const others = players.filter(p => p.id !== me?.id && p.pos && p.online);
+  const sameMap = myPos ? others.filter(p => p.pos!.group === myPos.group && p.pos!.num === myPos.num) : [];
+
+  return (
     <div className="panel">
       <section className="panel-section" aria-labelledby="map-title">
         <div className="here">
@@ -41,16 +62,7 @@ export function MapPanel() {
           </div>
           {myPos && <span className="mono muted">X {myPos.x} · Y {myPos.y}</span>}
         </div>
-        <div className="minimap" role="img" aria-label="Bản đồ vùng Hoenn với vị trí người chơi">
-          <img src="/game/region_map.png" alt="" width={w} height={h} />
-          {markers.map(m => (
-            <div key={m.p.id} className={`marker ${m.me ? 'me' : ''}`}
-              style={{ left: `${(m.x / w) * 100}%`, top: `${(m.y / h) * 100}%`, background: m.p.color, color: m.p.color, zIndex: m.me ? 3 : 2 }}
-              title={`${m.p.name} — ${placeName(meta, m.p.pos)}`}>
-              {!m.me && <span className="marker-label">{m.p.name}</span>}
-            </div>
-          ))}
-        </div>
+        <RegionMap />
       </section>
 
       <section className="panel-section" aria-labelledby="near-title">

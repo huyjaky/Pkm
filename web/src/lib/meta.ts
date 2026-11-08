@@ -2,6 +2,7 @@
 export type MapSection = { id: number; const: string; name: string; rect: [number, number, number, number] | null };
 
 export type Meta = {
+  romHash?: string;
   symbols: Record<string, string>;
   maps: { id: string; name: string }[][];
   regionMap: { image: string; width: number; height: number; sections: MapSection[] };

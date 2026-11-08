@@ -165,15 +165,18 @@ def meta():
     mtime = path.stat().st_mtime
     if _meta_cache.get("mtime") != mtime:
         _meta_cache.update(mtime=mtime, data=json.loads(path.read_text()))
-    return JSONResponse(_meta_cache["data"], headers={"Cache-Control": "public, max-age=300"})
+    # Always revalidated: its symbol addresses must match the ROM the client downloads.
+    return JSONResponse(_meta_cache["data"], headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/rom")
-def rom(_=Depends(current_user)):
+def rom(v: str = "", _=Depends(current_user)):
     path = settings.assets_dir / "rom.gba"
     if not path.exists():
         raise HTTPException(503, "ROM chưa được build")
-    return FileResponse(path, media_type="application/octet-stream", headers={"Cache-Control": "private, max-age=3600"})
+    # Versioned URL (?v=<sha1> from meta.json) can be cached forever; the bare URL is revalidated.
+    cache = "private, max-age=31536000, immutable" if v else "no-cache"
+    return FileResponse(path, media_type="application/octet-stream", headers={"Cache-Control": cache})
 
 
 async def _read_body(request: Request, limit: int) -> bytes:

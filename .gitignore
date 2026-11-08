@@ -11,3 +11,4 @@ __pycache__/
 *.sav
 .claude/
 *.tsbuildinfo
+.build.log

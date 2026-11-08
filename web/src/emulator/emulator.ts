@@ -27,6 +27,9 @@ export class Emulator {
   private saveListeners = new Set<() => void>();
   paused = false;
 
+  /** Raw mGBA module, for debugging only. */
+  get core() { return this.mod; }
+
   private constructor(mod: mGBAEmulator) {
     this.mod = mod as Core;
   }
@@ -86,6 +89,7 @@ export class Emulator {
   resume() { this.mod.resumeGame(); this.paused = false; }
   setVolume(v: number) { this.mod.setVolume(Math.max(0, Math.min(1, v))); }
   setFastForward(mult: number) { this.mod.setFastForwardMultiplier(mult); }
+  get fastForward() { return this.mod.getFastForwardMultiplier(); }
   setKeyboard(enabled: boolean) { this.mod.toggleInput(enabled); }
   press(b: GbaButton) { this.mod.buttonPress(b); }
   release(b: GbaButton) { this.mod.buttonUnpress(b); }

@@ -24,7 +24,8 @@ WORKDIR /src/pokeemerald-expansion
 # Hoenn Link patch: other online players appear and walk in the overworld
 COPY rom-patch/ /rom-patch/
 RUN python3 /rom-patch/apply.py /src/pokeemerald-expansion
-RUN make -j"$(nproc)"
+# Retry once: the upstream parallel build occasionally reads a generated JSON while it is still being written.
+RUN make -j"$(nproc)" || make -j"$(nproc)"
 COPY tools/extract_assets.py /tools/extract_assets.py
 RUN python3 /tools/extract_assets.py --repo /src/pokeemerald-expansion --out /assets
 

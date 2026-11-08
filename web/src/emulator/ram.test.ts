@@ -40,3 +40,13 @@ describe('stale save-state copy', () => {
     expect(pickLive(heap, found, block)).toBe(0x20000);
   });
 });
+
+describe('probe selection', () => {
+  it('finds a probe in mostly-empty RAM where 256-byte aligned bytes are all zero', () => {
+    const heap = new Uint8Array(1 << 18);
+    const block = new Uint8Array(0x8000);
+    for (let i = 0; i < 64; i++) block[0x1234 + i] = (i * 37 + 11) & 0xff; // unaligned, the only data
+    heap.set(block, 0x9000);
+    expect(findBlocks(heap, block)).toEqual([0x9000]);
+  });
+});

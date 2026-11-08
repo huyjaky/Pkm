@@ -60,8 +60,7 @@ static void UpdateGhost(u32 slot)
     bool32 visible = gOnlinePlayersMagic == ONLINE_PLAYERS_MAGIC
                   && remote->active
                   && remote->mapGroup == (s8)mapGroup
-                  && remote->mapNum == (s8)mapNum
-                  && remote->graphicsId != 0;
+                  && remote->mapNum == (s8)mapNum; // graphicsId 0 is Brendan, a valid sprite
 
     targetX = remote->x + MAP_OFFSET;
     targetY = remote->y + MAP_OFFSET;
