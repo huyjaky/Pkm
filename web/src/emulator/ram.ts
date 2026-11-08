@@ -96,6 +96,17 @@ export function findBlock(heap: Uint8Array, block: Uint8Array, minSimilarity = 0
   return findBlocks(heap, block, minSimilarity)[0] ?? -1;
 }
 
+/**
+ * mGBA allocates EWRAM and IWRAM as one block with IWRAM right after EWRAM (GBAMemoryInit), while a
+ * serialised save state stores IWRAM first and EWRAM 0x8000 later. The pair 0x40000 apart is the live RAM.
+ */
+export function pickLivePair(iwramCandidates: number[], ewramCandidates: number[]): { iwramAt: number; ewramAt: number } | null {
+  for (const e of ewramCandidates) {
+    if (iwramCandidates.includes(e + EWRAM_SIZE)) return { iwramAt: e + EWRAM_SIZE, ewramAt: e };
+  }
+  return null;
+}
+
 /** After the game ran for a moment, the live RAM differs from the snapshot; a stale copy does not. */
 export function pickLive(heap: Uint8Array, candidates: number[], snapshot: Uint8Array): number {
   if (candidates.length <= 1) return candidates[0] ?? -1;

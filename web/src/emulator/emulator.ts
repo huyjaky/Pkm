@@ -1,7 +1,7 @@
 import mGBA, { type mGBAEmulator } from '@thenick775/mgba-wasm';
 import {
   EWRAM_SIZE, GbaMemory, IWRAM_SIZE, STATE_EWRAM_OFFSET, STATE_IWRAM_OFFSET,
-  extractState, findBlocks, pickLive, readParty, readPosition, writeGhosts,
+  extractState, findBlocks, pickLive, pickLivePair, readParty, readPosition, writeGhosts,
   type GameSymbols, type Ghost, type PlayerPosition,
 } from './ram';
 
@@ -107,7 +107,7 @@ export class Emulator {
     let pausedHere = false;
     try {
       if (!this.paused) { this.mod.pauseGame(); pausedHere = true; }
-      await sleep(120);
+      await sleep(30); // let the emulation thread finish its frame
       if (!this.mod.saveStateSlot(CALIBRATION_SLOT, 0)) return false;
       const name = (fs.readdir(dir) as string[]).find(f => f.endsWith(`.ss${CALIBRATION_SLOT}`));
       if (!name) return false;
@@ -116,9 +116,18 @@ export class Emulator {
       const heap = this.mod.HEAPU8;
       const iwram = state.subarray(STATE_IWRAM_OFFSET, STATE_IWRAM_OFFSET + IWRAM_SIZE);
       const ewram = state.subarray(STATE_EWRAM_OFFSET, STATE_EWRAM_OFFSET + EWRAM_SIZE);
+      const t0 = performance.now();
       const iwramCandidates = findBlocks(heap, iwram);
       const ewramCandidates = findBlocks(heap, ewram);
+      console.debug('[ram] candidates', JSON.stringify({ iwram: iwramCandidates, ewram: ewramCandidates, ms: Math.round(performance.now() - t0) }));
       if (!iwramCandidates.length || !ewramCandidates.length) return false;
+      // Leftover save-state buffers hold identical copies; the live RAM is recognised by its layout.
+      const pair = pickLivePair(iwramCandidates, ewramCandidates);
+      if (pair) {
+        this.memory = new GbaMemory(() => this.mod.HEAPU8, pair.iwramAt, pair.ewramAt, this.rom);
+        console.debug('[ram] located (layout)', pair);
+        return true;
+      }
       if (iwramCandidates.length > 1 || ewramCandidates.length > 1) {
         // Let the game run briefly: live RAM changes, the leftover serialisation copy does not.
         if (pausedHere) { this.mod.resumeGame(); pausedHere = false; }
@@ -129,6 +138,7 @@ export class Emulator {
       const ewramAt = pickLive(this.mod.HEAPU8, ewramCandidates, ewram);
       if (iwramAt < 0 || ewramAt < 0) return false;
       this.memory = new GbaMemory(() => this.mod.HEAPU8, iwramAt, ewramAt, this.rom);
+      console.debug('[ram] located', { iwramAt, ewramAt });
       return true;
     } catch (e) {
       console.warn('[ram] calibration failed', e);
@@ -142,6 +152,7 @@ export class Emulator {
   /** Ensures RAM offsets are known; recalibrates at most every 15 s. */
   async ensureMemory(sym: GameSymbols): Promise<GbaMemory | null> {
     if (this.memory && this.memory.isRam(this.memory.u32(sym.saveBlock1Ptr))) return this.memory;
+    if (this.memory) console.debug('[ram] offsets no longer valid', this.memory.u32(sym.saveBlock1Ptr).toString(16));
     if (this.calibrating) return (await this.calibrating) ? this.memory : null;
     if (Date.now() - this.lastCalibration < 15000) return null;
     this.calibrating = this.calibrate().finally(() => { this.calibrating = null; });

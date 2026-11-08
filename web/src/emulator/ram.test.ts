@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findBlocks, GbaMemory, ONLINE_MAGIC, pickLive, readPosition, writeGhosts } from './ram';
+import { findBlocks, GbaMemory, ONLINE_MAGIC, pickLive, pickLivePair, readPosition, writeGhosts } from './ram';
 
 const EW = 0x40000;
 function setup() {
@@ -48,5 +48,15 @@ describe('probe selection', () => {
     for (let i = 0; i < 64; i++) block[0x1234 + i] = (i * 37 + 11) & 0xff; // unaligned, the only data
     heap.set(block, 0x9000);
     expect(findBlocks(heap, block)).toEqual([0x9000]);
+  });
+});
+
+describe('live RAM pair', () => {
+  it('picks the EWRAM/IWRAM pair laid out like mGBA, not the save-state copies', () => {
+    // Real numbers from a session: live pair first, then three save-state buffers (IWRAM, EWRAM 0x8000 later).
+    const iwram = [737280, 61050880, 46923776, 47976448];
+    const ewram = [475136, 46956544, 61083648, 48009216];
+    expect(pickLivePair(iwram, ewram)).toEqual({ iwramAt: 737280, ewramAt: 475136 });
+    expect(pickLivePair([46923776], [46956544])).toBeNull();
   });
 });
