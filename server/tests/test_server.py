@@ -135,13 +135,16 @@ def test_presence_chat_and_pvp_battle(app_module):
             hello_b = recv_until(wb, "hello")
             a_id, b_id = hello_a["you"]["id"], hello_b["you"]["id"]
 
-            wa.send_json({"t": "pos", "group": 0, "num": 9, "x": 5, "y": 7, "mapsec": 0})
+            wa.send_json({"t": "challenge", "to": "abc", "level": [1]})  # malformed: error reply, socket stays open
+            assert recv_until(wa, "error")["message"]
+            wa.send_json({"t": "pos", "group": 0, "num": 9, "x": 5, "y": 7, "mapsec": 0, "facing": 4, "elev": 3, "gfx": 89})
             for _ in range(50):
                 msg = recv_until(wb, "presence")
                 me = next((p for p in msg["players"] if p["id"] == a_id), None)
                 if me and me["pos"]:
                     break
             assert me["pos"]["x"] == 5 and me["pos"]["num"] == 9
+            assert me["pos"]["gfx"] == 89 and me["pos"]["facing"] == 4
 
             wa.send_json({"t": "chat", "text": "xin chào"})
             assert recv_until(wb, "chat")["text"] == "xin chào"

@@ -30,6 +30,10 @@ RAM_SYMBOLS = [
     "gMapHeader",
     "gMain",
     "CB2_Overworld",
+    # added by rom-patch/ (online players in the overworld); optional
+    "gOnlineSelf",
+    "gOnlinePlayers",
+    "gOnlinePlayersMagic",
 ]
 
 # Region map is drawn with a 1-tile margin on the left and 2 tiles on top (region_map.c).

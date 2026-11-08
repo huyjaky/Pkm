@@ -25,6 +25,7 @@ CHALLENGE_TTL_SECONDS = 60
 PRESENCE_INTERVAL = 0.25
 CHAT_MAX = 300
 CHAT_HISTORY = 50
+SEND_TIMEOUT = 3.0
 
 
 @dataclass
@@ -91,6 +92,7 @@ class BattleState:
     names: dict[str, str]
     logs: dict[str, list[str]] = field(default_factory=dict)  # slot or "spectator" -> lines
     requests: dict[str, Any] = field(default_factory=dict)
+    answered: dict[str, Any] = field(default_factory=dict)  # last request a choice was sent for
     teams: dict[str, Any] = field(default_factory=dict)
     ended: bool = False
     started: float = field(default_factory=time.time)
@@ -149,8 +151,15 @@ class Hub:
         p = self.players.get(user_id)
         if not p or not p.ws:
             return
+        ws = p.ws
         try:
-            await p.ws.send_json(msg)
+            await asyncio.wait_for(ws.send_json(msg), timeout=SEND_TIMEOUT)
+        except TimeoutError:
+            log.warning("send to %s timed out; closing socket", p.name)
+            try:
+                await ws.close(code=4008)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception:  # noqa: BLE001 - socket closing races
             pass
 
@@ -221,7 +230,12 @@ class Hub:
         if handler is None:
             await self.error(p.id, f"Unknown message {t!r}")
             return
-        await handler(p, msg)
+        try:
+            await handler(p, msg)
+        except RuntimeError as e:  # battle engine down
+            await self.error(p.id, f"Máy chủ trận đấu chưa sẵn sàng: {e}")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            await self.error(p.id, "Dữ liệu gửi lên không hợp lệ")
 
     # presence ----------------------------------------------------------------
     async def on_pos(self, p: Player, m: dict) -> None:
@@ -231,6 +245,7 @@ class Hub:
                 "x": int(m["x"]), "y": int(m["y"]),
                 "mapsec": int(m.get("mapsec", -1)),
                 "w": int(m.get("w", 0)), "h": int(m.get("h", 0)),
+                "facing": int(m.get("facing", 1)), "elev": int(m.get("elev", 3)), "gfx": int(m.get("gfx", 0)),
             }
         except (KeyError, TypeError, ValueError):
             return
@@ -407,19 +422,24 @@ class Hub:
             {"slot": s, "name": pl.name, "team": [m.to_dict() for m in pl.party if not m.isEgg]}
             for s, pl in slots.items()
         ]
+        # Everyone must know about the battle before the engine starts streaming logs and requests.
+        info = state.summary() | {"colors": {s: pl.color for s, pl in slots.items()}}
+        for s, pl in slots.items():
+            await self.send(pl.id, {"t": "battle_start", "battle": info | {"mySlot": s}})
         try:
             await self.engine.send({"cmd": "create", "id": bid, "format": fmt, "level": level, "players": players})
         except RuntimeError as e:
             await self._abort_battle(state, str(e))
             return
-        info = state.summary() | {"colors": {s: pl.color for s, pl in slots.items()}}
-        for s, pl in slots.items():
-            await self.send(pl.id, {"t": "battle_start", "battle": info | {"mySlot": s}})
         await self.broadcast({"t": "battles", "battles": [b.summary() for b in self.battles.values() if not b.ended]})
         self._presence_dirty = True
 
     async def _abort_battle(self, b: BattleState, reason: str) -> None:
         b.ended = True
+        try:
+            await self.engine.send({"cmd": "destroy", "id": b.id})
+        except RuntimeError:
+            pass
         for s, uid in b.slots.items():
             if (pl := self.players.get(uid)) and pl.battle_id == b.id:
                 pl.battle_id = None
@@ -444,7 +464,8 @@ class Hub:
         if not b or not slot or b.ended:
             return
         choice = str(m.get("choice", ""))[:100]
-        b.requests.pop(slot, None)
+        if slot in b.requests:
+            b.answered[slot] = b.requests.pop(slot)
         await self.engine.send({"cmd": "choose", "id": b.id, "slot": slot, "choice": choice})
 
     async def on_forfeit(self, p: Player, m: dict) -> None:
@@ -483,6 +504,7 @@ class Hub:
         elif kind == "request":
             slot = evt["slot"]
             b.requests[slot] = evt["request"]
+            b.answered.pop(slot, None)
             await self.send(b.slots[slot], {"t": "battle_request", "battle": b.id, "request": evt["request"]})
         elif kind == "teams":
             b.teams = evt.get("teams", {})
@@ -491,6 +513,8 @@ class Hub:
         elif kind == "error":
             slot = evt.get("slot")
             if slot:
+                if slot in b.answered:  # choice rejected: the request is still open
+                    b.requests[slot] = b.answered.pop(slot)
                 await self.send(b.slots[slot], {"t": "battle_error", "battle": b.id, "message": evt.get("message", "")})
             elif not b.ended:
                 await self._abort_battle(b, evt.get("message", "Lỗi trận đấu"))

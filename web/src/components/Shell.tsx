@@ -64,7 +64,7 @@ export function Shell({ user, onLogout }: { user: User; onLogout: () => void }) 
 
       <div className="main">
         <div className="stage">
-          <GameStage />
+          <GameStage userId={user.id} />
           {battle && <BattleScreen battle={battle} />}
         </div>
         <aside className="rail" aria-label="Bảng điều khiển">

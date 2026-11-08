@@ -1,7 +1,10 @@
 import { applyLines, newBattle, type BattleView, type ShowdownRequest } from './battle';
 import { createStore } from './store';
 
-export type Pos = { group: number; num: number; x: number; y: number; mapsec: number; w: number; h: number };
+export type Pos = {
+  group: number; num: number; x: number; y: number; mapsec: number; w: number; h: number;
+  facing?: number; elev?: number; gfx?: number;
+};
 export type OnlinePlayer = {
   id: number; name: string; color: string; online: boolean; pos: Pos | null;
   inBattle: boolean; roomId: string | null; partySize: number; lead: number | null;
@@ -82,7 +85,8 @@ function handle(m: any) {
   const b = s.battle && s.battle.id === m.battle ? s.battle : null;
   switch (m.t) {
   case 'hello':
-    session.set({ me: m.you, players: m.players, rooms: m.rooms, battles: m.battles, challenges: m.challenges, chat: m.chat, party: m.party ?? [] });
+    // battle: null - if a battle is still live the server follows up with battle_resume
+    session.set({ me: m.you, players: m.players, rooms: m.rooms, battles: m.battles, challenges: m.challenges, chat: m.chat, party: m.party ?? [], battle: null });
     break;
   case 'presence':
     session.set({ players: m.players, me: m.players.find((p: OnlinePlayer) => p.id === s.me?.id) ?? s.me });

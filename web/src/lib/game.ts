@@ -1,5 +1,5 @@
 import { Emulator } from '../emulator/emulator';
-import type { GameSymbols, PlayerPosition } from '../emulator/ram';
+import { ONLINE_SLOTS, type GameSymbols, type Ghost, type PlayerPosition } from '../emulator/ram';
 import { api } from './api';
 import { loadMeta, symbol, type Meta } from './meta';
 import { send, session, toast } from './session';
@@ -34,6 +34,17 @@ let lastPartyKey = '';
 let lastPartySent = 0;
 let failedReads = 0;
 let pausedForBattle = false;
+let userId = 0;
+/** Friend id -> ghost slot in gOnlinePlayers, kept stable so sprites don't swap. */
+const ghostSlots = new Map<number, number>();
+
+const localSaveKey = () => `hl-save-at-${userId}`;
+function localSavedAt(): number {
+  try { return Number(localStorage.getItem(localSaveKey())) || 0; } catch { return 0; }
+}
+function markLocalSave() {
+  try { localStorage.setItem(localSaveKey(), String(Math.floor(Date.now() / 1000))); } catch { /* storage blocked */ }
+}
 
 export const getEmulator = () => emu;
 
@@ -49,7 +60,8 @@ function hash(bytes: Uint8Array) {
   return h >>> 0;
 }
 
-export async function startGame(canvas: HTMLCanvasElement) {
+export async function startGame(canvas: HTMLCanvasElement, forUser: number) {
+  userId = forUser;
   if (game.get().phase === 'loading' || game.get().phase === 'running') return;
   game.set({ phase: 'loading', message: '', progress: 'Khởi động mGBA…' });
   try {
@@ -63,17 +75,20 @@ export async function startGame(canvas: HTMLCanvasElement) {
       mapHeader: symbol(meta, 'gMapHeader'),
       main: meta.symbols.gMain ? symbol(meta, 'gMain') : undefined,
       overworldCallback: meta.symbols.CB2_Overworld ? symbol(meta, 'CB2_Overworld') : undefined,
+      onlineSelf: meta.symbols.gOnlineSelf ? symbol(meta, 'gOnlineSelf') : undefined,
+      onlinePlayers: meta.symbols.gOnlinePlayers ? symbol(meta, 'gOnlinePlayers') : undefined,
+      onlineMagic: meta.symbols.gOnlinePlayersMagic ? symbol(meta, 'gOnlinePlayersMagic') : undefined,
     };
     emu = await Emulator.create(canvas);
     game.set({ progress: 'Tải ROM…' });
     const [rom, cloud] = await Promise.all([api.rom(), api.getSave()]);
     game.set({ progress: 'Nạp dữ liệu save…' });
-    const { usedLocalSave } = await emu.boot(rom, cloud);
+    const { usedLocalSave } = await emu.boot(rom, cloud, userId, localSavedAt());
     emu.setVolume(game.get().volume);
     emu.onSaveChanged(scheduleUpload);
     game.set({ phase: 'running', progress: '', save: cloud ? 'synced' : 'none', paused: false });
     if (usedLocalSave) {
-      toast('Đã dùng bản save lưu trên trình duyệt này và tải lên máy chủ.');
+      toast('Đã dùng bản save mới hơn lưu trên trình duyệt này và tải lên máy chủ.');
       scheduleUpload();
     }
     window.setInterval(tick, 250);
@@ -97,13 +112,14 @@ async function tick() {
   if (game.get().ram !== 'ok') game.set({ ram: 'ok' });
   const { pos, party } = data;
   if (pos) {
-    const key = `${pos.group}.${pos.num}.${pos.x}.${pos.y}.${pos.mapsec}`;
+    const key = `${pos.group}.${pos.num}.${pos.x}.${pos.y}.${pos.mapsec}.${pos.facing}.${pos.gfx}.${pos.elev}`;
     if (key !== lastPosKey) {
       lastPosKey = key;
       game.set({ pos });
       send({ t: 'pos', ...pos });
     }
   }
+  updateGhosts(pos);
   const pkey = `${party.count}:${hash(party.data.subarray(0, party.count * 100))}`;
   const now = Date.now();
   if (party.count && pkey !== lastPartyKey && now - lastPartySent > 1500) {
@@ -111,6 +127,30 @@ async function tick() {
     lastPartySent = now;
     send({ t: 'party', count: party.count, data: toBase64(party.data.subarray(0, party.count * 100)) });
   }
+}
+
+/** Copies friends standing on our map into the ROM so it draws them walking around. */
+function updateGhosts(myPos: PlayerPosition | null) {
+  if (!emu || !sym?.onlinePlayers) return;
+  const { players, me } = session.get();
+  const here = myPos ?? game.get().pos;
+  const friends = here ? players.filter(p => p.id !== me?.id && p.online && !p.inBattle && p.pos
+    && p.pos.group === here.group && p.pos.num === here.num && p.pos.gfx) : [];
+  const ids = new Set(friends.map(f => f.id));
+  for (const id of [...ghostSlots.keys()]) if (!ids.has(id)) ghostSlots.delete(id);
+  const slots: (Ghost | null)[] = Array(ONLINE_SLOTS).fill(null);
+  for (const f of friends) {
+    let slot = ghostSlots.get(f.id);
+    if (slot === undefined) {
+      const used = new Set(ghostSlots.values());
+      slot = [...Array(ONLINE_SLOTS).keys()].find(i => !used.has(i));
+      if (slot === undefined) continue;
+      ghostSlots.set(f.id, slot);
+    }
+    const p = f.pos!;
+    slots[slot] = { group: p.group, num: p.num, x: p.x, y: p.y, facing: p.facing ?? 1, elev: p.elev ?? 3, gfx: p.gfx! };
+  }
+  emu.writeGhosts(sym, slots);
 }
 
 /** Re-send position and party after a reconnect. */
@@ -122,6 +162,8 @@ export function resendState() {
 
 function scheduleUpload() {
   game.set({ save: 'pending' });
+  markLocalSave();
+  void emu?.persistLocal();
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(uploadSave, 1500);
 }
@@ -145,8 +187,11 @@ function flushSave() {
   if (game.get().save !== 'pending' || !emu) return;
   const data = emu.getSave();
   if (data) {
-    // keepalive lets the request finish while the tab closes
-    void fetch('/api/save', { method: 'PUT', body: data as BodyInit, keepalive: data.length < 60000, credentials: 'same-origin' });
+    // A flash save (128 KB) is over the 64 KB keepalive limit, so this only completes while the page
+    // is still alive (tab hidden). On a real close the newer IndexedDB copy wins at the next boot.
+    void fetch('/api/save', { method: 'PUT', body: data as BodyInit, credentials: 'same-origin' })
+      .then(r => r.ok && game.set({ save: 'synced', savedAt: Math.floor(Date.now() / 1000) }))
+      .catch(() => undefined);
   }
 }
 

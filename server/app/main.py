@@ -239,7 +239,7 @@ async def ws_endpoint(ws: WebSocket):
             msg = await ws.receive_json()
             if isinstance(msg, dict):
                 await hub.handle(player, msg)
-    except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError):
+    except (WebSocketDisconnect, RuntimeError, KeyError, UnicodeDecodeError, json.JSONDecodeError):
         pass
     except asyncio.CancelledError:
         raise

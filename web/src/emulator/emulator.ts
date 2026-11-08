@@ -1,11 +1,11 @@
 import mGBA, { type mGBAEmulator } from '@thenick775/mgba-wasm';
 import {
   EWRAM_SIZE, GbaMemory, IWRAM_SIZE, STATE_EWRAM_OFFSET, STATE_IWRAM_OFFSET,
-  extractState, findBlock, readParty, readPosition, type GameSymbols, type PlayerPosition,
+  extractState, findBlocks, pickLive, readParty, readPosition, writeGhosts,
+  type GameSymbols, type Ghost, type PlayerPosition,
 } from './ram';
 
 const ROM_PATH = '/data/games/hoenn-link.gba';
-const SAVE_PATH = '/data/saves/hoenn-link.sav';
 const CALIBRATION_SLOT = 9;
 
 export type GbaButton = 'a' | 'b' | 'l' | 'r' | 'start' | 'select' | 'up' | 'down' | 'left' | 'right';
@@ -44,18 +44,24 @@ export class Emulator {
     return emu;
   }
 
-  /** Writes the ROM (and the cloud save, when given) into the emulator FS and starts the game. */
-  async boot(rom: ArrayBuffer, cloudSave: Uint8Array | null): Promise<{ usedLocalSave: boolean }> {
+  /**
+   * Writes the ROM into the emulator FS and starts the game. The save on this browser (one file per
+   * account) is kept when it is newer than the cloud copy, e.g. after an upload that never finished.
+   */
+  async boot(rom: ArrayBuffer, cloud: { data: Uint8Array; savedAt: number } | null, userId: number, localSavedAt: number):
+    Promise<{ usedLocalSave: boolean }> {
     this.rom = new Uint8Array(rom);
     const fs = this.mod.FS;
+    const savePath = `/data/saves/hoenn-link-${userId}.sav`;
     fs.writeFile(ROM_PATH, this.rom);
+    const localExists = fs.analyzePath(savePath).exists;
     let usedLocalSave = false;
-    if (cloudSave && cloudSave.length) {
-      fs.writeFile(SAVE_PATH, cloudSave);
+    if (cloud && cloud.data.length && !(localExists && localSavedAt > cloud.savedAt)) {
+      fs.writeFile(savePath, cloud.data);
     } else {
-      usedLocalSave = fs.analyzePath(SAVE_PATH).exists;
+      usedLocalSave = localExists;
     }
-    if (!this.mod.loadGame(ROM_PATH, SAVE_PATH)) throw new Error('mGBA không nạp được ROM');
+    if (!this.mod.loadGame(ROM_PATH, savePath)) throw new Error('mGBA không nạp được ROM');
     this.mod.setCoreSettings({ autoSaveStateEnable: false, restoreAutoSaveStateOnLoad: false });
     this.memory = null;
     this.paused = false;
@@ -88,11 +94,11 @@ export class Emulator {
   // ------------------------------------------------------------------ RAM access
   private async calibrate(): Promise<boolean> {
     this.lastCalibration = Date.now();
-    const wasPaused = this.paused;
     const fs = this.mod.FS;
     const dir = this.mod.filePaths().saveStatePath;
+    let pausedHere = false;
     try {
-      if (!wasPaused) this.mod.pauseGame();
+      if (!this.paused) { this.mod.pauseGame(); pausedHere = true; }
       await sleep(120);
       if (!this.mod.saveStateSlot(CALIBRATION_SLOT, 0)) return false;
       const name = (fs.readdir(dir) as string[]).find(f => f.endsWith(`.ss${CALIBRATION_SLOT}`));
@@ -100,8 +106,19 @@ export class Emulator {
       const state = await extractState(fs.readFile(`${dir}/${name}`) as Uint8Array);
       try { fs.unlink(`${dir}/${name}`); } catch { /* ignore */ }
       const heap = this.mod.HEAPU8;
-      const iwramAt = findBlock(heap, state.subarray(STATE_IWRAM_OFFSET, STATE_IWRAM_OFFSET + IWRAM_SIZE));
-      const ewramAt = findBlock(heap, state.subarray(STATE_EWRAM_OFFSET, STATE_EWRAM_OFFSET + EWRAM_SIZE));
+      const iwram = state.subarray(STATE_IWRAM_OFFSET, STATE_IWRAM_OFFSET + IWRAM_SIZE);
+      const ewram = state.subarray(STATE_EWRAM_OFFSET, STATE_EWRAM_OFFSET + EWRAM_SIZE);
+      const iwramCandidates = findBlocks(heap, iwram);
+      const ewramCandidates = findBlocks(heap, ewram);
+      if (!iwramCandidates.length || !ewramCandidates.length) return false;
+      if (iwramCandidates.length > 1 || ewramCandidates.length > 1) {
+        // Let the game run briefly: live RAM changes, the leftover serialisation copy does not.
+        if (pausedHere) { this.mod.resumeGame(); pausedHere = false; }
+        if (this.paused) return false;
+        await sleep(250);
+      }
+      const iwramAt = pickLive(this.mod.HEAPU8, iwramCandidates, iwram);
+      const ewramAt = pickLive(this.mod.HEAPU8, ewramCandidates, ewram);
       if (iwramAt < 0 || ewramAt < 0) return false;
       this.memory = new GbaMemory(() => this.mod.HEAPU8, iwramAt, ewramAt, this.rom);
       return true;
@@ -109,7 +126,8 @@ export class Emulator {
       console.warn('[ram] calibration failed', e);
       return false;
     } finally {
-      if (!wasPaused) this.mod.resumeGame();
+      // Resume only what we paused, and never behind a pause started meanwhile (e.g. a PvP battle).
+      if (pausedHere && !this.paused) this.mod.resumeGame();
     }
   }
 
@@ -120,6 +138,11 @@ export class Emulator {
     if (Date.now() - this.lastCalibration < 15000) return null;
     this.calibrating = this.calibrate().finally(() => { this.calibrating = null; });
     return (await this.calibrating) ? this.memory : null;
+  }
+
+  /** Shows friends in the overworld (needs the rom-patch symbols). */
+  writeGhosts(sym: GameSymbols, slots: (Ghost | null)[]): boolean {
+    return this.memory ? writeGhosts(this.memory, sym, slots) : false;
   }
 
   async read(sym: GameSymbols): Promise<{ pos: PlayerPosition | null; party: { count: number; data: Uint8Array } } | null> {

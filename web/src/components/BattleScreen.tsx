@@ -100,15 +100,36 @@ function Result({ battle }: { battle: BattleView }) {
 
 // ------------------------------------------------------------------ choice building
 type Pending = { parts: string[]; moveIndex: number | null; tera: boolean };
+type DecisionSlot = { index: number; kind: 'switch' | 'move' | 'pass' };
+
+/**
+ * One entry per active position. Slots that need no decision answer "pass": the non-forced side of
+ * a forced switch, and (doubles/multi) a fainted active Pokémon with nothing left to send in.
+ */
+function decisionSlots(req: ShowdownRequest): DecisionSlot[] {
+  const activeMons = req.side.pokemon.filter(m => m.active);
+  if (req.forceSwitch) return req.forceSwitch.map((f, index) => ({ index, kind: f ? 'switch' : 'pass' }));
+  return (req.active ?? []).map((_, index) => ({
+    index,
+    kind: activeMons[index] && parseCondition(activeMons[index].condition).fainted ? 'pass' : 'move',
+  }));
+}
+
+/** Appends "pass" for every following slot that needs no decision. */
+function withPasses(parts: string[], slots: DecisionSlot[]): string[] {
+  const out = [...parts];
+  while (out.length < slots.length && slots[out.length].kind === 'pass') out.push('pass');
+  return out;
+}
 
 function Controls({ battle, meta }: { battle: BattleView; meta: Meta | null }) {
   const req = battle.request;
   const [pending, setPending] = useState<Pending>({ parts: [], moveIndex: null, tera: false });
   useEffect(() => {
-    // During a forced switch, slots that are not forced answer "pass" automatically.
-    const parts: string[] = [];
-    if (req?.forceSwitch) while (parts.length < req.forceSwitch.length && !req.forceSwitch[parts.length]) parts.push('pass');
-    if (req?.forceSwitch && parts.length >= req.forceSwitch.length) return;
+    if (!req || req.teamPreview) { setPending({ parts: [], moveIndex: null, tera: false }); return; }
+    const slots = decisionSlots(req);
+    const parts = withPasses([], slots);
+    if (slots.length && parts.length >= slots.length) { choose(parts.join(', ')); return; }
     setPending({ parts, moveIndex: null, tera: false });
   }, [req]);
 
@@ -143,25 +164,17 @@ function Controls({ battle, meta }: { battle: BattleView; meta: Meta | null }) {
     );
   }
 
-  // Which active slots need a decision this request
-  const slots: { index: number; kind: 'switch' | 'move' }[] = [];
-  if (req.forceSwitch) {
-    req.forceSwitch.forEach((f, i) => slots.push({ index: i, kind: f ? 'switch' : 'move' }));
-  } else if (req.active) {
-    req.active.forEach((_, i) => slots.push({ index: i, kind: 'move' }));
-  }
+  const slots = decisionSlots(req);
   const step = pending.parts.length;
   const current = slots[step];
 
   const advance = (part: string) => {
-    const parts = [...pending.parts, part];
-    // Auto-pass slots that need nothing (e.g. a non-forced slot during a forced switch).
-    while (parts.length < slots.length && req.forceSwitch && !req.forceSwitch[parts.length]) parts.push('pass');
+    const parts = withPasses([...pending.parts, part], slots);
     if (parts.length >= slots.length) submit(parts);
     else setPending({ parts, moveIndex: null, tera: false });
   };
 
-  if (!current || (req.forceSwitch && current.kind === 'move')) return head('Đang chờ…');
+  if (!current || current.kind === 'pass') return head('Đang chờ…');
 
   const chosenSwitches = pending.parts.filter(p => p.startsWith('switch')).map(p => Number(p.split(' ')[1]));
   const canSwitch = (i: number) => {

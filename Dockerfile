@@ -21,6 +21,9 @@ RUN apt-get update \
 WORKDIR /src
 RUN git clone --depth 1 --branch "${ROM_REF}" "${ROM_REPO}" pokeemerald-expansion
 WORKDIR /src/pokeemerald-expansion
+# Hoenn Link patch: other online players appear and walk in the overworld
+COPY rom-patch/ /rom-patch/
+RUN python3 /rom-patch/apply.py /src/pokeemerald-expansion
 RUN make -j"$(nproc)"
 COPY tools/extract_assets.py /tools/extract_assets.py
 RUN python3 /tools/extract_assets.py --repo /src/pokeemerald-expansion --out /assets

@@ -36,13 +36,11 @@ export const api = {
     request<User>('/api/auth/register', json({ username, password, invite })),
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   rom: () => request<ArrayBuffer>('/api/rom'),
-  async getSave(): Promise<Uint8Array | null> {
-    try {
-      return new Uint8Array(await request<ArrayBuffer>('/api/save'));
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) return null;
-      throw e;
-    }
+  async getSave(): Promise<{ data: Uint8Array; savedAt: number } | null> {
+    const res = await fetch('/api/save', { credentials: 'same-origin' });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new ApiError(res.status, `Không tải được save (${res.status})`);
+    return { data: new Uint8Array(await res.arrayBuffer()), savedAt: Number(res.headers.get('X-Saved-At')) || 0 };
   },
   putSave: (data: Uint8Array) =>
     request<{ savedAt: number }>('/api/save', {

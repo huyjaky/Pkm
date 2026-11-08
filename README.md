@@ -3,6 +3,7 @@
 Trang web để chơi **pokeemerald-expansion** cùng bạn bè, hoàn toàn trên trình duyệt:
 
 - Mỗi người chơi bản game của riêng mình (mGBA chạy bằng WebAssembly), tự do theo cốt truyện hoặc đi đâu tuỳ thích. Không có ràng buộc nào giữa các người chơi.
+- **Thấy nhau ngay trong game**: khi đứng cùng bản đồ, nhân vật của bạn bè xuất hiện và đi lại trong thế giới game (đi bộ, đạp xe, lướt sóng đúng sprite), không chắn đường ai.
 - **Minimap**: thấy vị trí của nhau trên bản đồ vùng Hoenn, kèm radar những người đang ở cùng bản đồ.
 - **PVP**: thách đấu 1v1 (đấu đơn / đấu đôi) và phòng **đấu đội 2v2**, dùng chính đội hình đang có trong game. Có bảng xếp hạng thắng/thua.
 - Chat chung, save **tự động đồng bộ** lên máy chủ, điều khiển cảm ứng trên điện thoại.
@@ -21,6 +22,7 @@ Trình duyệt (mỗi người)                         Máy chủ (Docker)
 ```
 
 - **ROM** được build từ source ngay trong Docker (`make`), sau đó `tools/extract_assets.py` lấy ra: địa chỉ RAM (`gSaveBlock1Ptr`, `gParties`, `gMapHeader`…), bảng species/move/item, sprite, và ảnh bản đồ vùng cho minimap.
+- **Patch ROM** (`rom-patch/`): thêm `src/online_players.c` vào source trước khi build. Mỗi khung hình, ROM ghi trạng thái của chính người chơi vào `gOnlineSelf` và vẽ bạn bè từ bộ đệm `gOnlinePlayers` (tối đa 8 người cùng bản đồ) thành các nhân vật đi lại. Web ghi vị trí bạn bè vào bộ đệm đó qua bộ nhớ emulator; ROM không tự kết nối mạng.
 - **Đọc RAM**: mgba-wasm không có API đọc bộ nhớ, nên web tạm dừng game, chụp một save state, rồi tìm đúng vùng IWRAM/EWRAM đó trong heap WebAssembly. Sau lần dò này, việc đọc vị trí và đội hình (4 lần/giây) gần như không tốn gì.
 - **PVP** dùng simulator của Pokémon Showdown (cơ chế Gen 9, hỗ trợ Mega/Tera như bản expansion). Đội hình được giải mã từ RAM, hồi đầy máu, và có thể quy về Lv 50 / Lv 100 hoặc giữ nguyên cấp. Khi vào trận PVP, game của bạn tự tạm dừng và chạy tiếp sau trận.
 
@@ -51,6 +53,8 @@ docker compose build --no-cache app && docker compose up -d
 Save của người chơi nằm trong volume `hoenn-data` (file `/data/hoenn-link.db`), không mất khi build lại.
 
 ### Chạy thử trên máy mình (không cần tên miền)
+
+Trên Windows: cài [Docker Desktop](https://www.docker.com/products/docker-desktop/) (bật WSL2 khi được hỏi), mở Docker Desktop cho đến khi nó báo đang chạy, rồi trong thư mục dự án:
 
 ```bash
 docker compose -f docker-compose.local.yml up --build
@@ -121,5 +125,6 @@ Bàn phím: mũi tên di chuyển, `X` = A, `Z` = B, `A`/`S` = L/R, `Enter` = St
 ## Giới hạn hiện tại
 
 - PVP chạy trên simulator Showdown chứ không phải trận link trong ROM, nên một số chiêu/đặc tính tự chế riêng của bản hack (nếu có) sẽ không có trong PVP.
-- Vị trí hiển thị theo khu vực (thành phố/route) trên bản đồ vùng và theo toạ độ ô khi ở cùng bản đồ; người chơi không thấy sprite của nhau bên trong game.
+- Nhân vật bạn bè trong game là "bóng": không nói chuyện, đổi đồ hay đấu trực tiếp trong game được; PVP đi qua sảnh Đấu của trang web. Khi bạn bè lướt sóng, chỉ thấy tư thế lướt, không có thú cưỡi bên dưới.
+- Patch ROM được áp vào source upstream bằng các điểm neo cố định. Nếu bản expansion mới đổi các đoạn đó, bước build Docker sẽ dừng với thông báo rõ ràng thay vì âm thầm bỏ tính năng.
 - Mỗi tài khoản chỉ mở được một tab cùng lúc (tab mới sẽ ngắt tab cũ).

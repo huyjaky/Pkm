@@ -4,7 +4,7 @@ import { cycleSpeed, game, getEmulator, saveNow, setVolume, startGame, togglePau
 import { useStore } from '../lib/store';
 import { TouchPad } from './TouchPad';
 
-export function GameStage() {
+export function GameStage({ userId }: { userId: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const screen = useRef<HTMLDivElement>(null);
   const phase = useStore(game, s => s.phase);
@@ -38,7 +38,7 @@ export function GameStage() {
                   <>
                     <h2>Sẵn sàng vào Hoenn</h2>
                     <p>Game chạy ngay trên trình duyệt của bạn. Save được tải từ máy chủ và tự lưu lại khi bạn ghi trong game.</p>
-                    <button className="btn primary" onClick={() => canvas.current && startGame(canvas.current)}>
+                    <button className="btn primary" onClick={() => canvas.current && startGame(canvas.current, userId)}>
                       <Play aria-hidden="true" /> Bắt đầu chơi
                     </button>
                   </>
