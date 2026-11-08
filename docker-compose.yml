@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        ROM_REPO: ${ROM_REPO:-https://github.com/rh-hideout/pokeemerald-expansion.git}
+        ROM_REF: ${ROM_REF:-master}
+    image: hoenn-link:latest
+    restart: unless-stopped
+    environment:
+      INVITE_CODE: ${INVITE_CODE:-}
+      COOKIE_SECURE: "1"
+      SESSION_DAYS: ${SESSION_DAYS:-30}
+    volumes:
+      - hoenn-data:/data
+    expose:
+      - "8000"
+
+  # HTTPS is required: the in-browser emulator uses threads (SharedArrayBuffer),
+  # which browsers only allow on secure, cross-origin-isolated pages.
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?Đặt DOMAIN trong file .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  hoenn-data:
+  caddy-data:
+  caddy-config:

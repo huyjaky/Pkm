@@ -1,0 +1,18 @@
+# Conda environment for Hoenn Link (used for local development and inside the Docker runtime image).
+#   conda env create -f environment.yml
+#   conda activate pkm-online
+name: pkm-online
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - nodejs=20
+  - pip
+  - pip:
+      - fastapi==0.162.2
+      - uvicorn[standard]==0.54.0
+      - bcrypt==5.0.0
+      - pillow==13.0.0
+      - httpx==0.28.1
+      - websockets==17.4
+      - pytest==9.2.0

@@ -1,0 +1,10 @@
+vendor/
+**/node_modules/
+web/dist/
+.data*/
+.dev-assets/
+.taste-skill/
+.claude/
+**/__pycache__/
+**/.pytest_cache/
+.env

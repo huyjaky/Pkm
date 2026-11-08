@@ -1,0 +1,14 @@
+# Chạy thử trên chính máy của bạn (http://localhost:8000), không cần tên miền:
+#   docker compose -f docker-compose.local.yml up --build
+services:
+  app:
+    build: .
+    image: hoenn-link:latest
+    environment:
+      INVITE_CODE: ${INVITE_CODE:-}
+    volumes:
+      - hoenn-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+volumes:
+  hoenn-data:

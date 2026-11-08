@@ -1,0 +1,13 @@
+vendor/
+node_modules/
+web/dist/
+.data*/
+.dev-assets/
+.taste-skill/
+__pycache__/
+.pytest_cache/
+.env
+*.gba
+*.sav
+.claude/
+*.tsbuildinfo
